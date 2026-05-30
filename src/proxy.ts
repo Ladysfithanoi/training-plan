@@ -44,6 +44,10 @@ export async function proxy(request: NextRequest) {
   const isPublicPath =
     path.startsWith('/login') ||
     path.startsWith('/api/auth') ||
+    // Magic-link guest program view + its API — validated by token, not a session.
+    // Recipients (students) must reach these WITHOUT logging in.
+    path.startsWith('/p/') ||
+    path.startsWith('/api/p/') ||
     path.startsWith('/_next') ||
     path.startsWith('/favicon')
 
