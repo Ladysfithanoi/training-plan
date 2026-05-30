@@ -1,0 +1,56 @@
+import { requireAdmin } from '@/lib/auth'
+import { createClient } from '@/lib/supabase/server'
+
+/** POST /api/user-programs — assign a training block to a user */
+export async function POST(request: Request) {
+  try {
+    await requireAdmin()
+  } catch {
+    return Response.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { user_id, block_id, start_date, notes } = await request.json()
+
+  if (!user_id || !block_id) {
+    return Response.json({ error: 'user_id and block_id are required' }, { status: 400 })
+  }
+
+  // Use session-based client — "Admins manage user programs" RLS policy allows this
+  const supabase = await createClient()
+
+  // Pause any existing active program for this user
+  await supabase
+    .from('user_programs')
+    .update({ status: 'paused' })
+    .eq('user_id', user_id)
+    .eq('status', 'active')
+
+  // Get the first phase of this block
+  const { data: firstPhase } = await supabase
+    .from('phases')
+    .select('id')
+    .eq('block_id', block_id)
+    .order('phase_order', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  const effectiveStartDate = start_date ?? new Date().toISOString().split('T')[0]
+
+  const { data, error } = await supabase
+    .from('user_programs')
+    .insert({
+      user_id,
+      block_id,
+      current_phase_id: firstPhase?.id ?? null,
+      start_date: effectiveStartDate,
+      phase_start_date: effectiveStartDate,
+      status: 'active',
+      notes: notes ?? null,
+    })
+    .select('*, block:training_blocks(*), current_phase:phases(*)')
+    .single()
+
+  if (error) return Response.json({ error: error.message }, { status: 400 })
+
+  return Response.json({ program: data }, { status: 201 })
+}

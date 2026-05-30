@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/* ─── Design System — Tailwind v4 @theme ──────────────────────────────────── */
+/*
+ * Font families
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Three variables are injected onto <html> by next/font at runtime
+ * (--font-sans, --font-serif, --font-mono). The @theme fallbacks below are
+ * used only when fonts haven't loaded yet, and they also register the
+ * font-sans / font-serif / font-mono Tailwind utility classes for v4.
+ *
+ * Mapping:
+ *   font-sans  → Be Vietnam Pro  — UI chrome, body, buttons, badges, labels
+ *   font-serif → Source Serif 4  — h1–h6, section titles, italic emphasis
+ *   font-mono  → JetBrains Mono  — metrics, rep targets, dates, data values
+ */
+@theme {
+  /* Typography */
+  --font-sans:  'Be Vietnam Pro', ui-sans-serif,  system-ui, sans-serif;
+  --font-serif: 'Source Serif 4', ui-serif,       Georgia,   serif;
+  --font-mono:  'JetBrains Mono', ui-monospace,   Consolas,  monospace;
+
+  /* Brand colours */
+  --color-paper:   #F6F2EA;   /* Background  — 90 % of surfaces */
+  --color-ink:     #14110E;   /* Primary text + strong CTAs */
+  --color-amber:   #B5651E;   /* Eyebrow, links, italic highlights (≤5 %) */
+  --color-herb:    #5C6E48;   /* Coach notes, neutral data */
+  --color-slate:   #3A5567;   /* Success / online / achieved */
+  --color-danger:  #A33A2A;   /* Errors, delays, overshoots */
+
+  /* Semantic aliases (Tailwind generates bg-surface, bg-accent, etc.) */
+  --color-surface:   var(--color-paper);
+  --color-primary:   var(--color-ink);
+  --color-accent:    var(--color-amber);
+  --color-success:   var(--color-slate);
+  --color-error:     var(--color-danger);
+}
+
+/* ─── Base styles ─────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+}
+
+/* ─── Typography scale ────────────────────────────────────────────────────── */
+/*
+ * All semantic headings use Source Serif 4.
+ * UI labels (uppercase tracking-widest eyebrows, table headers, badge text)
+ * are <p> / <span> / <th> — they stay in Be Vietnam Pro via body inheritance.
+ */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-ink);
+}
+
+/* ─── Scrollbar (webkit) ─────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: color-mix(in srgb, var(--color-ink) 20%, transparent); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-ink) 35%, transparent); }
+
+/* ─── Focus ring ─────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────── */
+::selection {
+  background-color: color-mix(in srgb, var(--color-amber) 25%, transparent);
+}

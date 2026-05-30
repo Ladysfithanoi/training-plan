@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/check-transitions",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}

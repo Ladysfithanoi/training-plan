@@ -1,0 +1,203 @@
+'use client'
+
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { cn } from '@/lib/utils'
+import type { Profile } from '@/types'
+import { Logo } from './Logo'
+
+interface NavItem {
+  href:      string
+  label:     string
+  icon:      React.ReactNode
+  adminOnly?: boolean
+}
+
+function Icon({ d }: { d: string }) {
+  return (
+    <svg className="h-4.5 w-4.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={d} />
+    </svg>
+  )
+}
+
+// ─── Main nav (all users) ─────────────────────────────────────────────────────
+// Items with adminOnly:true are only rendered for admin/coach accounts.
+// "Lịch tập của tôi" replaces the old "Buổi tập / Nhật ký" slot —
+// coaches get the full week/day/matrix view; the /workouts list is no longer
+// surfaced as a primary nav item.
+const navItems: NavItem[] = [
+  {
+    href:  '/dashboard',
+    label: 'Bảng điều khiển',
+    icon:  <Icon d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />,
+  },
+  {
+    href:  '/programs',
+    label: 'Chương trình của tôi',
+    icon:  <Icon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />,
+  },
+  {
+    // Promoted from admin section — coaches now land here for their personal
+    // training log (week selector → day tabs → exercise matrix → survey).
+    href:      '/admin/my-training',
+    label:     'Lịch tập của tôi',
+    adminOnly: true,
+    icon:      <Icon d="M5 8.5V15.5M19 8.5V15.5M7.5 12H16.5M7.5 8.5a1.5 1.5 0 00-3 0v7a1.5 1.5 0 003 0M16.5 8.5a1.5 1.5 0 013 0v7a1.5 1.5 0 01-3 0" />,
+  },
+  {
+    href:  '/progress',
+    label: 'Tiến độ tập luyện',
+    icon:  <Icon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />,
+  },
+]
+
+// ─── Admin-only section ───────────────────────────────────────────────────────
+// "Lịch tập của tôi" has been removed from here — it lives in the main nav now.
+const adminNavItems: NavItem[] = [
+  {
+    href:      '/admin',
+    label:     'Bảng điều khiển HLV',
+    adminOnly: true,
+    icon:      <Icon d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />,
+  },
+  {
+    href:      '/admin/users',
+    label:     'Danh sách Học viên',
+    adminOnly: true,
+    icon:      <Icon d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />,
+  },
+  {
+    href:      '/admin/library',
+    label:     'Kho bài tập',
+    adminOnly: true,
+    icon:      <Icon d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />,
+  },
+  {
+    href:      '/admin/programs',
+    label:     'Giáo án tập luyện',
+    adminOnly: true,
+    icon:      <Icon d="M4 6h16M4 10h16M4 14h16M4 18h16" />,
+  },
+]
+
+interface SidebarProps {
+  profile:  Profile
+  onLogout: () => void
+}
+
+export function Sidebar({ profile, onLogout }: SidebarProps) {
+  const pathname = usePathname()
+  const isAdmin  = profile.role === 'admin'
+
+  function isActive(href: string) {
+    if (href === '/dashboard') return pathname === '/dashboard'
+    if (href === '/admin')     return pathname === '/admin'
+    return pathname.startsWith(href + '/') || pathname === href
+  }
+
+  return (
+    <aside className="flex h-full flex-col w-12 md:w-58 shrink-0 border-r border-ink/8 bg-white transition-all duration-200">
+
+      {/* ── Brand ────────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2.5 px-2.5 md:px-5 py-[18px] border-b border-ink/8 overflow-hidden">
+        <Logo className="h-8 w-8" />
+        <span className="font-serif font-bold text-sm text-ink tracking-tight leading-tight hidden md:inline whitespace-nowrap">
+          Kế hoạch Tập luyện
+        </span>
+      </div>
+
+      {/* ── Navigation ───────────────────────────────────────────────────────── */}
+      <nav className="flex-1 overflow-y-auto py-3 px-1.5 md:px-2.5 space-y-0.5">
+
+        {/* Main nav — skip adminOnly items for non-admin users */}
+        {navItems
+          .filter(item => !item.adminOnly || isAdmin)
+          .map(item => (
+            <Link
+              key={item.href}
+              href={item.href}
+              title={item.label}
+              className={cn(
+                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150',
+                isActive(item.href)
+                  ? 'bg-ink text-paper'
+                  : 'text-ink/50 hover:text-ink hover:bg-ink/6',
+              )}
+            >
+              {item.icon}
+              <span className="hidden md:inline truncate">{item.label}</span>
+            </Link>
+          ))}
+
+        {/* Admin section */}
+        {isAdmin && (
+          <>
+            <div className="pt-4 pb-1 px-2.5 hidden md:block">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber">
+                Quản trị viên / HLV
+              </p>
+            </div>
+            <div className="md:hidden pt-3 pb-1 flex justify-center">
+              <div className="h-px w-5 bg-amber/50" />
+            </div>
+            {adminNavItems.map(item => (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.label}
+                className={cn(
+                  'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150',
+                  isActive(item.href)
+                    ? 'bg-ink text-paper'
+                    : 'text-ink/50 hover:text-ink hover:bg-ink/6',
+                )}
+              >
+                {item.icon}
+                <span className="hidden md:inline truncate">{item.label}</span>
+              </Link>
+            ))}
+          </>
+        )}
+      </nav>
+
+      {/* ── User footer ──────────────────────────────────────────────────────── */}
+      <div className="border-t border-ink/8 p-2 md:p-3">
+        {/* Full footer — md+ */}
+        <div className="hidden md:flex items-center gap-2.5 mb-2.5">
+          <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink shrink-0">
+            {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-ink truncate leading-tight">
+              {profile.full_name ?? profile.email}
+            </p>
+            <p className="text-[11px] text-ink/40 capitalize">
+              {profile.role === 'admin' ? 'Quản trị viên' : 'Học viên'}
+            </p>
+          </div>
+        </div>
+
+        {/* Compact avatar — mobile */}
+        <div className="md:hidden flex justify-center mb-2">
+          <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink">
+            {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
+          </div>
+        </div>
+
+        <button
+          onClick={onLogout}
+          title="Đăng xuất"
+          className="w-full flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-ink/45 hover:text-danger transition-colors rounded-lg px-2 py-1.5 hover:bg-danger/6"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span className="hidden md:inline">Đăng xuất</span>
+        </button>
+      </div>
+
+    </aside>
+  )
+}
