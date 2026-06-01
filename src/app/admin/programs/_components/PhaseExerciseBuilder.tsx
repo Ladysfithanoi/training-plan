@@ -290,6 +290,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const renameRef                         = useRef<HTMLInputElement>(null)
   const [addingDay, setAddingDay]         = useState(false)
   const [newDayType, setNewDayType]       = useState<DayType>('push')
+  // Custom session name — only used when newDayType === 'other' (buổi "Khác")
+  const [newDayLabel, setNewDayLabel]     = useState('')
 
   // Save states
   const [splitSaving, setSplitSaving] = useState(false)  // silent bg save
@@ -704,17 +706,25 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // ── Day CRUD ──────────────────────────────────────────────────────────────────
   function handleAddDay() {
     if (!splitType) return
+    // Buổi "Khác": dùng tên tự do coach nhập (fallback "Khác N" nếu để trống).
+    // Các loại buổi khác: nhãn tự sinh theo thứ tự (vd "Đẩy 2").
+    const label =
+      newDayType === 'other'
+        ? (newDayLabel.trim() ||
+            `${DAY_TYPE_LABELS.other} ${splitDays.filter(d => d.type === 'other').length + 1}`)
+        : `${DAY_TYPE_LABELS[newDayType]} ${
+            splitDays.filter(d => d.type === newDayType).length + 1
+          }`
     const newDay: SplitDay = {
       id:    crypto.randomUUID(),
       type:  newDayType,
-      label: `${DAY_TYPE_LABELS[newDayType]} ${
-        splitDays.filter(d => d.type === newDayType).length + 1
-      }`,
+      label,
     }
     const updated = [...splitDays, newDay]
     setSplitDays(updated)
     setActiveDayId(newDay.id)
     setAddingDay(false)
+    setNewDayLabel('')
     void persistSplitConfig(splitType, updated)
   }
 
@@ -1340,6 +1350,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                         onClick={() => {
                           const types = availableDayTypes(splitType)
                           setNewDayType(types[0])
+                          setNewDayLabel('')
                           setAddingDay(true)
                         }}
                         className="rounded-lg border border-dashed border-ink/20 px-3 py-1.5 text-xs text-ink/40 hover:border-ink/35 hover:text-ink/60 transition-colors font-medium"
@@ -1350,18 +1361,36 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                       <div className="flex items-center gap-1.5">
                         <select
                           value={newDayType}
-                          onChange={e => setNewDayType(e.target.value as DayType)}
+                          onChange={e => {
+                            setNewDayType(e.target.value as DayType)
+                            setNewDayLabel('')
+                          }}
                           className="rounded border border-ink/20 bg-white px-2 py-1 text-xs text-ink focus:border-amber outline-none"
                         >
                           {availableDayTypes(splitType).map(t => (
                             <option key={t} value={t}>{DAY_TYPE_LABELS[t]}</option>
                           ))}
                         </select>
+                        {/* Buổi "Khác" → cho phép coach nhập tên buổi tự do */}
+                        {newDayType === 'other' && (
+                          <input
+                            type="text"
+                            value={newDayLabel}
+                            onChange={e => setNewDayLabel(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter')  handleAddDay()
+                              if (e.key === 'Escape') { setAddingDay(false); setNewDayLabel('') }
+                            }}
+                            placeholder="Tên buổi tập…"
+                            autoFocus
+                            className="rounded border border-amber px-2 py-1 text-xs text-ink focus:outline-none w-36"
+                          />
+                        )}
                         <button onClick={handleAddDay}
                           className="text-xs text-herb font-semibold px-2 py-1 rounded hover:bg-herb/10">
                           Thêm
                         </button>
-                        <button onClick={() => setAddingDay(false)}
+                        <button onClick={() => { setAddingDay(false); setNewDayLabel('') }}
                           className="text-xs text-ink/40 px-1.5 py-1 rounded hover:bg-ink/5">
                           Huỷ
                         </button>

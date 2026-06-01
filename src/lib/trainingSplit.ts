@@ -17,7 +17,7 @@
 
 export type SplitType = 'fullbody' | 'upper_lower' | 'ppl'
 
-export type DayType = 'fullbody' | 'upper' | 'lower' | 'push' | 'pull' | 'legs'
+export type DayType = 'fullbody' | 'upper' | 'lower' | 'push' | 'pull' | 'legs' | 'other'
 
 /** A single coach-editable day slot within a phase split. */
 export interface SplitDay {
@@ -88,6 +88,7 @@ export const PATTERN_NAMES_BY_DAY: Record<DayType, string[]> = {
   push:     ['Push', 'Isolation'],
   pull:     ['Pull', 'Isolation'],
   legs:     ['Squat', 'Hinge', 'Isolation'],
+  other:    [],                                         // all patterns — buổi tự do
 }
 
 /** Vietnamese label for each day type. */
@@ -98,6 +99,7 @@ export const DAY_TYPE_LABELS: Record<DayType, string> = {
   push:     'Đẩy (Push)',
   pull:     'Kéo (Pull)',
   legs:     'Chân (Legs)',
+  other:    'Khác',
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -143,14 +145,18 @@ export function filterPatternsByDay<T extends { name: string }>(
   return patterns.filter(p => lc.includes(p.name.toLowerCase()))
 }
 
-/** Day types available to add for a given split type. */
+/**
+ * Day types available to add for a given split type.
+ * Every split also offers 'other' (Khác) — a free-form day where the coach
+ * names the session themselves and may pick from ALL exercises (no pattern filter).
+ */
 export function availableDayTypes(splitType: SplitType): DayType[] {
   const map: Record<SplitType, DayType[]> = {
     fullbody:    ['fullbody'],
     upper_lower: ['upper', 'lower'],
     ppl:         ['push', 'pull', 'legs'],
   }
-  return map[splitType]
+  return [...map[splitType], 'other']
 }
 
 /** Select-dropdown options for split type. */
