@@ -288,6 +288,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [renamingDayId, setRenamingDayId] = useState<string | null>(null)
   const [renameLabel, setRenameLabel]     = useState('')
   const renameRef                         = useRef<HTMLInputElement>(null)
+  // Panel thêm bài tập — dùng để tự cuộn xuống khi mở
+  const addPanelRef                       = useRef<HTMLDivElement>(null)
   const [addingDay, setAddingDay]         = useState(false)
   const [newDayType, setNewDayType]       = useState<DayType>('push')
   // Custom session name — only used when newDayType === 'other' (buổi "Khác")
@@ -588,6 +590,16 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       renamingPhaseRef.current.select()
     }
   }, [renamingPhaseId])
+
+  // Khi mở panel "Thêm bài tập" → cuộn mượt xuống đúng khu vực điền thông tin.
+  // requestAnimationFrame đảm bảo panel đã mount xong trước khi cuộn.
+  useEffect(() => {
+    if (!addOpen) return
+    const raf = requestAnimationFrame(() => {
+      addPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [addOpen])
 
   // Reset exercise-picker filters & vertical label when active day changes
   useEffect(() => {
@@ -1797,6 +1809,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           {/* ── ADD EXERCISE PANEL ──────────────────────────────────────── */}
           {/* ════════════════════════════════════════════════════════════════ */}
           {addOpen && (
+            <div ref={addPanelRef} className="scroll-mt-4">
             <Card accent="amber">
               <CardBody>
                 <div className="space-y-5">
@@ -2134,6 +2147,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 </div>
               </CardBody>
             </Card>
+            </div>
           )}
         </>
       )}
