@@ -351,6 +351,24 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     | null
   >(null)
 
+  // ── Edit exercise modal ───────────────────────────────────────────────────────
+  // Full edit of an existing phase_exercise row in one place: swap the exercise
+  // itself plus every prescription field (sets / reps / RIR / %1RM / AMRAP /
+  // loading style / STT). Pre-filled from the row when opened.
+  const [editingExercise, setEditingExercise]   = useState<PhaseExerciseRow | null>(null)
+  const [editFilterPattern, setEditFilterPattern] = useState('')
+  const [editExerciseId, setEditExerciseId]     = useState('')
+  const [editSets, setEditSets]                 = useState('3')
+  const [editRepMin, setEditRepMin]             = useState('8')
+  const [editRepMax, setEditRepMax]             = useState('12')
+  const [editRir, setEditRir]                   = useState('2')
+  const [editLoadingStyle, setEditLoadingStyle] = useState<'horizontal' | 'vertical'>('horizontal')
+  const [editOrderLabel, setEditOrderLabel]     = useState('')
+  const [editIsAmrap, setEditIsAmrap]           = useState(false)
+  const [editTarget1rmPct, setEditTarget1rmPct] = useState('')
+  const [editSaving, setEditSaving]             = useState(false)
+  const [editError, setEditError]               = useState<string | null>(null)
+
   // ── Derived values ───────────────────────────────────────────────────────────
   /**
    * The block the coach is currently configuring.
@@ -832,6 +850,68 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     if (res.ok) {
       setPhaseExercises(prev => prev.filter(pe => pe.id !== phaseExerciseId))
     }
+  }
+
+  // ── Edit exercise ──────────────────────────────────────────────────────────────
+  /** Open the edit modal pre-filled with the row's current values. */
+  function startEditExercise(pe: PhaseExerciseRow) {
+    setEditingExercise(pe)
+    setEditExerciseId(pe.exercise_id)
+    setEditFilterPattern(pe.exercise?.movement_pattern_id ?? '')
+    setEditSets(String(pe.target_sets ?? 3))
+    setEditRepMin(String(pe.target_rep_min ?? 8))
+    setEditRepMax(String(pe.target_rep_max ?? 12))
+    setEditRir(String(pe.rir_target ?? 2))
+    setEditLoadingStyle(pe.loading_style === 'vertical' ? 'vertical' : 'horizontal')
+    setEditOrderLabel(pe.order_label ?? '')
+    setEditIsAmrap(pe.is_amrap ?? false)
+    setEditTarget1rmPct(pe.target_percentage_1rm != null ? String(pe.target_percentage_1rm) : '')
+    setEditError(null)
+  }
+
+  /** Persist all edited fields in a single PATCH; replace the row from the join. */
+  async function handleSaveEdit() {
+    if (!editingExercise || !editExerciseId) return
+    setEditSaving(true)
+    setEditError(null)
+
+    const res = await fetch(
+      `/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${editingExercise.id}`,
+      {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exercise_id:    editExerciseId,
+          target_sets:    parseInt(editSets)   || 3,
+          target_rep_min: parseInt(editRepMin) || 1,
+          target_rep_max: parseInt(editRepMax) || (isStrengthContext ? 3 : 12),
+          order_label:    editOrderLabel.trim().toUpperCase() || null,
+          loading_style:  editLoadingStyle,
+
+          // Context-aware periodisation fields (mirror handleAdd):
+          //   Strength/Peaking → prescribe by %1RM, RIR & AMRAP suppressed
+          //   Hypertrophy      → prescribe by RIR, %1RM suppressed
+          rir_target:            isStrengthContext ? null : (parseInt(editRir) || 2),
+          is_amrap:              isStrengthContext ? false : editIsAmrap,
+          target_percentage_1rm: isStrengthContext && editTarget1rmPct
+            ? (parseInt(editTarget1rmPct) || null)
+            : null,
+        }),
+      },
+    )
+
+    const data = await res.json()
+    setEditSaving(false)
+
+    if (!res.ok) {
+      setEditError(data.error ?? 'Không thể cập nhật bài tập')
+      return
+    }
+
+    setPhaseExercises(prev =>
+      prev.map(pe => pe.id === editingExercise.id ? data.exercise : pe),
+    )
+    setEditingExercise(null)
   }
 
   // ── Meso (phase) CRUD ─────────────────────────────────────────────────────────
@@ -1677,14 +1757,34 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                         />
                       </td>
 
-                      {/* ── Delete ── */}
+                      {/* ── Edit / Delete actions ── */}
                       <td className="px-4 py-2.5">
-                        <button
-                          onClick={() => handleRemove(pe.id)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity text-danger hover:text-danger/70 text-xs font-medium"
-                        >
-                          Xoá
-                        </button>
+                        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {/* Sửa — bút chì */}
+                          <button
+                            type="button"
+                            onClick={() => startEditExercise(pe)}
+                            title="Sửa bài tập"
+                            className="h-7 w-7 rounded flex items-center justify-center text-ink/40 hover:text-amber hover:bg-amber/8 transition-colors"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                          {/* Xoá — thùng rác */}
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(pe.id)}
+                            title="Xoá bài tập"
+                            className="h-7 w-7 rounded flex items-center justify-center text-danger/50 hover:text-danger hover:bg-danger/8 transition-colors"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2121,6 +2221,187 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Edit exercise modal ──────────────────────────────────────────── */}
+      <Modal
+        open={editingExercise !== null}
+        onClose={() => setEditingExercise(null)}
+        title="Sửa bài tập"
+        size="lg"
+      >
+        {editingExercise && (
+          <div className="space-y-5">
+
+            {/* ── Exercise picker ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                  Chuỗi Chuyển Động
+                </label>
+                <select
+                  value={editFilterPattern}
+                  onChange={e => {
+                    setEditFilterPattern(e.target.value)
+                    // Nếu bài tập đang chọn không thuộc chuỗi mới → bỏ chọn
+                    if (e.target.value) {
+                      const stillValid = exercises.some(
+                        ex => ex.id === editExerciseId && ex.movement_pattern_id === e.target.value,
+                      )
+                      if (!stillValid) setEditExerciseId('')
+                    }
+                  }}
+                  className="rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+                >
+                  <option value="">Tất cả Chuỗi Chuyển Động</option>
+                  {patterns.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <Select
+                label="Bài tập"
+                value={editExerciseId}
+                onChange={e => setEditExerciseId(e.target.value)}
+                options={(editFilterPattern
+                  ? exercises.filter(ex => ex.movement_pattern_id === editFilterPattern)
+                  : exercises
+                ).map(ex => ({ value: ex.id, label: ex.name }))}
+                placeholder="Chọn bài tập..."
+              />
+            </div>
+
+            {/* ── Kiểu xếp lịch (Loading Style) ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {LOADING_STYLE_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setEditLoadingStyle(opt.value)}
+                  className={cn(
+                    'flex flex-col items-start rounded-lg border px-3.5 py-3 text-left transition-all',
+                    editLoadingStyle === opt.value
+                      ? 'border-amber bg-amber/8 shadow-sm'
+                      : 'border-ink/12 bg-white hover:border-ink/25',
+                  )}
+                >
+                  <span className={cn(
+                    'text-xs font-bold',
+                    editLoadingStyle === opt.value ? 'text-amber' : 'text-ink',
+                  )}>
+                    {opt.label}
+                  </span>
+                  <span className="text-[11px] text-ink/45 mt-0.5 leading-snug">
+                    {opt.desc}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* ── Prescription grid (context-aware col 4, mirrors add panel) ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Input
+                label="Số hiệp" type="number"
+                value={editSets} onChange={e => setEditSets(e.target.value)}
+              />
+              <Input
+                label="Rep Tối thiểu" type="number"
+                value={editRepMin} onChange={e => setEditRepMin(e.target.value)}
+              />
+              <Input
+                label="Rep Tối đa" type="number"
+                value={editRepMax} onChange={e => setEditRepMax(e.target.value)}
+              />
+              {isStrengthContext ? (
+                <Input
+                  label="% 1RM mục tiêu" type="number"
+                  value={editTarget1rmPct} onChange={e => setEditTarget1rmPct(e.target.value)}
+                />
+              ) : (
+                <Input
+                  label="RIR mục tiêu" type="number"
+                  value={editRir} onChange={e => setEditRir(e.target.value)}
+                />
+              )}
+            </div>
+
+            {/* ── AMRAP toggle (hypertrophy context only) ── */}
+            {!isStrengthContext && (
+              <label className={cn(
+                'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
+                editIsAmrap ? 'border-amber/40 bg-amber/6' : 'border-ink/10 bg-ink/2 hover:border-ink/20',
+              )}>
+                <input
+                  type="checkbox"
+                  checked={editIsAmrap}
+                  onChange={e => setEditIsAmrap(e.target.checked)}
+                  className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-amber"
+                />
+                <div className="min-w-0">
+                  <p className={cn('text-xs font-bold', editIsAmrap ? 'text-amber' : 'text-ink')}>
+                    🔥 Thiết lập hiệp cuối AMRAP
+                  </p>
+                  <p className="text-[11px] text-ink/45 mt-0.5 leading-snug">
+                    Hiệp cuối thực hiện tối đa số lần tới khi RPE 10.
+                  </p>
+                </div>
+              </label>
+            )}
+
+            {/* ── STT / Order label ── */}
+            <div className="flex flex-col gap-1.5 max-w-[220px]">
+              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                Mã STT
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={editOrderLabel}
+                  onChange={e => setEditOrderLabel(e.target.value.toUpperCase())}
+                  placeholder="A, B1…"
+                  maxLength={4}
+                  className="w-24 rounded-lg border border-ink/20 px-3 py-2 text-sm font-bold text-ink uppercase focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+                />
+                {editOrderLabel && (
+                  <span className={cn(
+                    'rounded-md border font-bold text-sm px-2.5 py-0.5',
+                    orderBadgeClass(editOrderLabel),
+                  )}>
+                    {editOrderLabel.toUpperCase()}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {editError && (
+              <p className="rounded-lg bg-danger/8 border border-danger/20 px-3 py-2 text-sm text-danger">
+                {editError}
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button
+                type="button"
+                variant="primary"
+                loading={editSaving}
+                onClick={() => void handleSaveEdit()}
+                disabled={!editExerciseId || editSaving}
+                className="flex-1"
+              >
+                Lưu thay đổi
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setEditingExercise(null)}
+                disabled={editSaving}
+              >
+                Huỷ
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ── Confirm delete modal ─────────────────────────────────────────── */}

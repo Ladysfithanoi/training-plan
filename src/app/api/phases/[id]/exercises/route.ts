@@ -96,6 +96,9 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
 
   const body = await request.json()
   const supabase = await createClient()
+  // Return the joined exercise so the client can refresh the row after an
+  // exercise swap (new name / type / movement pattern come back in one trip).
+  const sel = '*, exercise:exercises(*, movement_pattern:movement_patterns(*))'
 
   // Numeric fields — cast before storing
   const numericFields = [
@@ -109,6 +112,9 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
   const booleanFields = ['is_amrap']
 
   const patch: Record<string, unknown> = {}
+  // exercise_id — swapping the underlying exercise. Required NOT NULL, so only
+  // apply when a truthy value is supplied (never allow it to be cleared).
+  if (body.exercise_id) patch.exercise_id = body.exercise_id
   for (const k of numericFields) {
     if (k in body) patch[k] = body[k] ?? null   // allow null to clear %1RM
   }
@@ -129,7 +135,7 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
     .update(patch)
     .eq('id', phaseExerciseId)
     .eq('phase_id', id)
-    .select('*')
+    .select(sel)
     .single()
 
   // Attempt 2: migration-006 columns missing → drop them and retry.
@@ -143,14 +149,14 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
         .update(stripped)
         .eq('id', phaseExerciseId)
         .eq('phase_id', id)
-        .select('*')
+        .select(sel)
         .single()
     } else {
       // Only migration-006 fields were requested — nothing left to persist;
       // return the current row so the UI doesn't error.
       result = await supabase
         .from('phase_exercises')
-        .select('*')
+        .select(sel)
         .eq('id', phaseExerciseId)
         .eq('phase_id', id)
         .single()
