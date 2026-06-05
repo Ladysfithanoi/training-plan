@@ -289,11 +289,11 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
 
       {/* Phân trang */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-ink/40">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mt-3">
+          <p className="text-xs text-ink/40 whitespace-nowrap shrink-0">
             Hiển thị {globalOffset + 1}–{Math.min(globalOffset + PAGE_SIZE, filtered.length)} / {filtered.length}
           </p>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}

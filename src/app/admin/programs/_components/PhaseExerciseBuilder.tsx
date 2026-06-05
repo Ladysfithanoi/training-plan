@@ -1464,8 +1464,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           {/* ════════════════════════════════════════════════════════════════ */}
           <div className="rounded-xl border border-ink/10 bg-white overflow-hidden">
 
-            {/* Header row */}
-            <div className="px-5 py-4 border-b border-ink/8 flex items-center justify-between gap-4">
+            {/* Header row — stacks on mobile so the controls never overlap the title */}
+            <div className="px-4 sm:px-5 py-4 border-b border-ink/8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-widest text-ink/40">
                   Kiểu Chương Trình Tập
@@ -1489,7 +1489,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 )}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                 {/* ── Lưu cấu hình giáo án — explicit save button ── */}
                 {splitType && (
                   <button
@@ -1526,7 +1526,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                     const val = e.target.value as SplitType
                     if (val) handleSetSplitType(val)
                   }}
-                  className="rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+                  className="flex-1 sm:flex-none min-w-[150px] rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
                 >
                   <option value="">— Chọn kiểu split —</option>
                   {SPLIT_TYPE_OPTIONS.map(o => (
@@ -1774,7 +1774,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                   return (
                     <div key={name} className="flex items-center gap-3">
                       {/* Muscle group name */}
-                      <p className="w-44 shrink-0 text-xs font-medium text-ink/65 truncate">
+                      <p className="w-24 sm:w-44 shrink-0 text-xs font-medium text-ink/65 truncate">
                         {name}
                       </p>
 

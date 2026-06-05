@@ -366,11 +366,11 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
 
       {/* Phân trang */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-ink/40">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-ink/40 whitespace-nowrap shrink-0">
             Hiển thị {globalOffset + 1}–{Math.min(globalOffset + PAGE_SIZE, users.length)} / {users.length}
           </p>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}

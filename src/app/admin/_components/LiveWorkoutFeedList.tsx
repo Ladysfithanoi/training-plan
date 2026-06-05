@@ -128,11 +128,11 @@ export function LiveWorkoutFeedList({ sessions }: { sessions: FeedSession[] }) {
 
       {/* ── Pagination ───────────────────────────────────────────────────────── */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-1">
-          <p className="text-xs text-ink/40">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1">
+          <p className="text-xs text-ink/40 whitespace-nowrap shrink-0">
             Hiển thị {offset + 1}–{Math.min(offset + PAGE_SIZE, sessions.length)} / {sessions.length}
           </p>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
