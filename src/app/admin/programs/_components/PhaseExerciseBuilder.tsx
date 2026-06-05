@@ -385,11 +385,16 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [editError, setEditError]               = useState<string | null>(null)
 
   // ── Edit phase PARAMETERS modal (duration, frequency, rep zones, type…) ──────
+  // Numeric fields are kept as raw strings while editing so the user can clear a
+  // box to empty; on save, any blank/invalid field falls back to its original
+  // value (captured in pOriginal when the modal opens).
+  type RepZoneDraft = { min: string; max: string; exercise_type?: RepRange['exercise_type'] }
   const [paramsPhaseId, setParamsPhaseId]     = useState<string | null>(null)
+  const [pOriginal, setPOriginal]             = useState<Phase | null>(null)
   const [pPhaseType, setPPhaseType]           = useState<PhaseType>('training')
   const [pDuration, setPDuration]             = useState('4')
   const [pFreq, setPFreq]                     = useState('3')
-  const [pRepRanges, setPRepRanges]           = useState<RepRange[]>([])
+  const [pRepRanges, setPRepRanges]           = useState<RepZoneDraft[]>([])
   const [pReductionPct, setPReductionPct]     = useState('33')   // maintenance: % of Meso-2 volume
   const [pIncludesDeload, setPIncludesDeload] = useState(false)
   const [pMaxRir, setPMaxRir]                 = useState('10')   // active rest
@@ -1049,10 +1054,13 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
   function openPhaseParams(phase: Phase) {
     setParamsPhaseId(phase.id)
+    setPOriginal(phase)
     setPPhaseType(phase.phase_type)
     setPDuration(String(phase.duration_weeks))
     setPFreq(String(phase.frequency_per_week))
-    setPRepRanges(Array.isArray(phase.rep_ranges) ? phase.rep_ranges.map(r => ({ ...r })) : [])
+    setPRepRanges(Array.isArray(phase.rep_ranges)
+      ? phase.rep_ranges.map(r => ({ min: String(r.min), max: String(r.max), exercise_type: r.exercise_type }))
+      : [])
     setPReductionPct(String(Math.round((phase.target_set_reduction_factor ?? 1) * 100)))
     setPIncludesDeload(!!phase.includes_deload)
     setPMaxRir(phase.max_rir != null ? String(phase.max_rir) : '10')
@@ -1061,9 +1069,9 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   }
 
   function addRepZone() {
-    setPRepRanges(prev => [...prev, { min: 8, max: 12 }])
+    setPRepRanges(prev => [...prev, { min: '8', max: '12' }])
   }
-  function updateRepZone(idx: number, patch: Partial<RepRange>) {
+  function updateRepZone(idx: number, patch: Partial<RepZoneDraft>) {
     setPRepRanges(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
   }
   function removeRepZone(idx: number) {
@@ -1075,26 +1083,34 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setPSaving(true)
     setPError(null)
 
+    const orig = pOriginal
+    // Parse an integer; if blank/invalid, fall back to the supplied old value.
+    const parseOr = (s: string, fallback: number) => {
+      const n = parseInt(s, 10)
+      return Number.isNaN(n) ? fallback : n
+    }
+
     const cleanRanges: RepRange[] = pRepRanges
-      .map(r => {
-        const min = Number(r.min) || 0
-        const max = Number(r.max) || 0
+      .map((r, i) => {
+        const origR = orig?.rep_ranges?.[i]
+        const min = parseOr(r.min, origR?.min ?? 0)
+        const max = parseOr(r.max, origR?.max ?? 0)
         return r.exercise_type ? { min, max, exercise_type: r.exercise_type } : { min, max }
       })
       .filter(r => r.min > 0 && r.max >= r.min)
 
     const payload = {
       phase_type:                  pPhaseType,
-      duration_weeks:              Math.max(1, parseInt(pDuration) || 1),
-      frequency_per_week:          Math.max(1, parseInt(pFreq) || 1),
+      duration_weeks:              Math.max(1, parseOr(pDuration, orig?.duration_weeks ?? 1)),
+      frequency_per_week:          Math.max(1, parseOr(pFreq, orig?.frequency_per_week ?? 1)),
       rep_ranges:                  cleanRanges,
       target_set_reduction_factor: pPhaseType === 'maintenance'
-        ? (Math.max(1, parseInt(pReductionPct) || 100) / 100)
+        ? (Math.max(1, parseOr(pReductionPct, Math.round((orig?.target_set_reduction_factor ?? 1) * 100))) / 100)
         : 1.0,
       includes_deload:             pPhaseType === 'maintenance' ? pIncludesDeload : false,
-      max_rir:                     pPhaseType === 'active_rest' ? (parseInt(pMaxRir) || null) : null,
+      max_rir:                     pPhaseType === 'active_rest' ? parseOr(pMaxRir, orig?.max_rir ?? 10) : null,
       max_weight_percent:          pPhaseType === 'active_rest'
-        ? (Math.max(1, parseInt(pMaxWeightPct) || 50) / 100)
+        ? (Math.max(1, parseOr(pMaxWeightPct, Math.round((orig?.max_weight_percent ?? 0.5) * 100))) / 100)
         : null,
     }
 
@@ -2691,6 +2707,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               type="number"
               min={1}
               value={pDuration}
+              onFocus={e => e.target.select()}
               onChange={e => setPDuration(e.target.value)}
             />
             <Input
@@ -2698,6 +2715,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               type="number"
               min={1}
               value={pFreq}
+              onFocus={e => e.target.select()}
               onChange={e => setPFreq(e.target.value)}
             />
           </div>
@@ -2723,15 +2741,17 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 {pRepRanges.map((rr, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <input
-                      type="number" min={1} value={rr.min}
-                      onChange={e => updateRepZone(i, { min: parseInt(e.target.value) || 0 })}
+                      type="number" min={1} inputMode="numeric" value={rr.min}
+                      onFocus={e => e.target.select()}
+                      onChange={e => updateRepZone(i, { min: e.target.value })}
                       className="w-16 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-center font-mono focus:border-amber focus:ring-1 focus:ring-amber outline-none"
                       aria-label="Reps tối thiểu"
                     />
                     <span className="text-ink/30">–</span>
                     <input
-                      type="number" min={1} value={rr.max}
-                      onChange={e => updateRepZone(i, { max: parseInt(e.target.value) || 0 })}
+                      type="number" min={1} inputMode="numeric" value={rr.max}
+                      onFocus={e => e.target.select()}
+                      onChange={e => updateRepZone(i, { max: e.target.value })}
                       className="w-16 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-center font-mono focus:border-amber focus:ring-1 focus:ring-amber outline-none"
                       aria-label="Reps tối đa"
                     />
@@ -2768,6 +2788,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 type="number"
                 min={1}
                 value={pReductionPct}
+                onFocus={e => e.target.select()}
                 onChange={e => setPReductionPct(e.target.value)}
               />
               <label className="flex items-center gap-2 self-end pb-2 text-sm text-ink/70">
@@ -2790,6 +2811,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 type="number"
                 min={0}
                 value={pMaxRir}
+                onFocus={e => e.target.select()}
                 onChange={e => setPMaxRir(e.target.value)}
               />
               <Input
@@ -2797,6 +2819,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 type="number"
                 min={1}
                 value={pMaxWeightPct}
+                onFocus={e => e.target.select()}
                 onChange={e => setPMaxWeightPct(e.target.value)}
               />
             </div>
