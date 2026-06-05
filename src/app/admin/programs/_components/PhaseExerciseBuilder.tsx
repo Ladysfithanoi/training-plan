@@ -253,7 +253,15 @@ interface PhaseExerciseRow extends PhaseExercise {
   exercise: Exercise
 }
 
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'nochange'
+
+/** Stable signature of a split config (type + ordered days) for change detection. */
+function splitSig(type: SplitType | null, days: SplitDay[]): string {
+  return JSON.stringify({
+    type: type ?? null,
+    days: (days ?? []).map(d => ({ id: d.id, type: d.type, label: d.label })),
+  })
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -296,6 +304,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [splitType, setSplitType]     = useState<SplitType | null>(null)
   const [splitDays, setSplitDays]     = useState<SplitDay[]>([])
   const [activeDayId, setActiveDayId] = useState<string | null>(null)
+  // The last-committed (DB) split config. Used to (a) restore exact saved days
+  // when the coach re-selects the saved type after previewing another, and
+  // (b) detect "no changes" on save. Split config is a DRAFT: it only persists
+  // when the coach presses "Lưu cấu hình giáo án".
+  const [savedConfig, setSavedConfig] = useState<{ type: SplitType | null; days: SplitDay[] }>({ type: null, days: [] })
 
   // Day CRUD
   const [renamingDayId, setRenamingDayId] = useState<string | null>(null)
@@ -309,7 +322,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [newDayLabel, setNewDayLabel]     = useState('')
 
   // Save states
-  const [splitSaving, setSplitSaving] = useState(false)  // silent bg save
   const [saveStatus, setSaveStatus]   = useState<SaveStatus>('idle') // explicit button
 
   // ── Add exercise form ────────────────────────────────────────────────────────
@@ -418,6 +430,16 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const selectedPhase = phases.find(p => p.id === selectedPhaseId)
   const activeDay     = splitDays.find(d => d.id === activeDayId) ?? null
   const recommended   = selectedPhase ? recommendSplit(selectedPhase.frequency_per_week) : null
+
+  // Unsaved split-config changes (type or days differ from the saved baseline).
+  const configDirty = splitType !== null &&
+    splitSig(splitType, splitDays) !== splitSig(savedConfig.type, savedConfig.days)
+
+  // Exercises whose day_id no longer matches any current day (e.g. orphaned by a
+  // previous split-type change). Surfaced in a recovery panel so they're not lost.
+  const orphanExercises: PhaseExerciseRow[] = splitType
+    ? phaseExercises.filter(pe => !pe.day_id || !splitDays.some(d => d.id === pe.day_id))
+    : []
 
   /**
    * The exercise rows shown in the table.
@@ -580,12 +602,13 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     if (phase) {
       const st = (phase.split_type as SplitType) ?? null
       setSplitType(st)
+      const savedDays = Array.isArray(phase.split_days) ? (phase.split_days as SplitDay[]) : []
       const days: SplitDay[] =
-        Array.isArray(phase.split_days) && phase.split_days.length > 0
-          ? (phase.split_days as SplitDay[])
-          : (st ? generateDefaultDays(st) : [])
+        savedDays.length > 0 ? savedDays : (st ? generateDefaultDays(st) : [])
       setSplitDays(days)
       setActiveDayId(days[0]?.id ?? null)
+      // Snapshot exactly what's persisted in the DB (draft baseline).
+      setSavedConfig({ type: st, days: savedDays })
     }
 
     setAddOpen(false)
@@ -652,28 +675,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   }
 
   // ── Split config persistence ──────────────────────────────────────────────────
-  // Silent background save triggered by every day mutation (add / rename / delete).
-  // Normalises the days array before serialising so JSON.stringify never silently
-  // drops keys (undefined values are omitted by the JSON spec).
-  async function persistSplitConfig(type: SplitType, days: SplitDay[]) {
-    setSplitSaving(true)
-    try {
-      // Explicitly pick only the three fields Supabase expects in the JSONB column.
-      // Guards against extra prototype keys and ensures a plain [] is sent when
-      // the array is empty rather than null / undefined.
-      const safeDays = Array.isArray(days)
-        ? days.map(d => ({ id: d.id, type: d.type, label: d.label }))
-        : []
-
-      await fetch(`/api/phases/${selectedPhaseId}`, {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ split_type: type, split_days: safeDays }),
-      })
-    } finally {
-      setSplitSaving(false)
-    }
-  }
+  // NOTE: Split config (type + days) is a DRAFT. Mutations below only update
+  // local state — nothing is persisted until the coach presses
+  // "Lưu cấu hình giáo án" (handleSaveConfig). This prevents the old bug where
+  // merely previewing another split type silently overwrote the saved config
+  // and orphaned all assigned exercises.
 
   // ── Week type persistence (migration 006) ────────────────────────────────────
   async function handleWeekTypeChange(val: WeekType) {
@@ -715,6 +721,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
    */
   async function handleSaveConfig() {
     if (!splitType) return
+
+    // Nothing changed since the last save/load → no-op (avoids a redundant commit
+    // that can error on identical re-save). Show a neutral "no changes" status.
+    if (splitSig(splitType, splitDays) === splitSig(savedConfig.type, savedConfig.days)) {
+      setSaveStatus('nochange')
+      setTimeout(() => setSaveStatus('idle'), 2500)
+      return
+    }
+
     setSaveStatus('saving')
     try {
       // Explicitly serialise each day to { id, type, label } — the exact shape
@@ -746,6 +761,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         throw new Error((payload as { error?: string }).error ?? 'save_failed')
       }
 
+      // Commit succeeded → this config is now the saved baseline.
+      setSavedConfig({ type: splitType, days: splitDays })
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2500)
     } catch (err) {
@@ -755,13 +772,20 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     }
   }
 
-  // ── Split type selection ──────────────────────────────────────────────────────
+  // ── Split type selection (LOCAL PREVIEW — never auto-persists) ─────────────────
   function handleSetSplitType(type: SplitType) {
+    // Re-selecting the currently-saved type restores its EXACT saved days so any
+    // assigned exercises reattach — previewing other types never destroys data.
+    if (type === savedConfig.type && savedConfig.days.length > 0) {
+      setSplitType(type)
+      setSplitDays(savedConfig.days)
+      setActiveDayId(savedConfig.days[0]?.id ?? null)
+      return
+    }
     const days = generateDefaultDays(type)
     setSplitType(type)
     setSplitDays(days)
     setActiveDayId(days[0]?.id ?? null)
-    void persistSplitConfig(type, days)
   }
 
   // ── Day CRUD ──────────────────────────────────────────────────────────────────
@@ -786,7 +810,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setActiveDayId(newDay.id)
     setAddingDay(false)
     setNewDayLabel('')
-    void persistSplitConfig(splitType, updated)
   }
 
   function startRenameDay(day: SplitDay) {
@@ -804,7 +827,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     )
     setSplitDays(updated)
     setRenamingDayId(null)
-    void persistSplitConfig(splitType, updated)
   }
 
   function handleDeleteDay(dayId: string) {
@@ -818,7 +840,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     const updated = splitDays.filter(d => d.id !== dayId)
     setSplitDays(updated)
     if (activeDayId === dayId) setActiveDayId(updated[0]?.id ?? null)
-    void persistSplitConfig(splitType, updated)
   }
 
   // ── Reorder training days (← / →) ────────────────────────────────────────────
@@ -832,7 +853,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     const updated = [...splitDays]
     ;[updated[idx], updated[swapIdx]] = [updated[swapIdx], updated[idx]]
     setSplitDays(updated)
-    void persistSplitConfig(splitType, updated)
   }
 
   // ── Exercise CRUD ─────────────────────────────────────────────────────────────
@@ -1258,6 +1278,22 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     ))
   }
 
+  // ── Orphan recovery: re-attach exercises that lost their day to a real day ─────
+  async function assignOrphansToActiveDay() {
+    if (!activeDayId || orphanExercises.length === 0) return
+    const ids = orphanExercises.map(e => e.id)
+    setPhaseExercises(prev =>
+      prev.map(pe => ids.includes(pe.id) ? { ...pe, day_id: activeDayId } : pe),
+    )
+    await Promise.all(ids.map(id =>
+      fetch(`/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ day_id: activeDayId }),
+      }),
+    ))
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -1453,10 +1489,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 <option value="peaking">🎯 Peaking</option>
               </select>
             </div>
-
-            {splitSaving && (
-              <span className="text-amber animate-pulse">Đang lưu…</span>
-            )}
           </div>
 
           {/* ════════════════════════════════════════════════════════════════ */}
@@ -1504,17 +1536,25 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                           ? 'border-danger/40 bg-danger/8 text-danger'
                           : saveStatus === 'saving'
                             ? 'border-amber/30 bg-amber/8 text-amber cursor-wait'
-                            : 'border-ink/20 bg-white text-ink hover:border-amber/50 hover:bg-amber/5 hover:text-amber',
+                            : saveStatus === 'nochange'
+                              ? 'border-ink/20 bg-ink/5 text-ink/50'
+                              : configDirty
+                                ? 'border-amber/50 bg-amber/8 text-amber'
+                                : 'border-ink/20 bg-white text-ink hover:border-amber/50 hover:bg-amber/5 hover:text-amber',
                     )}
                   >
                     {saveStatus === 'saving' && (
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     )}
-                    {saveStatus === 'saved'  && <span>✓</span>}
-                    {saveStatus === 'error'  && <span>✕</span>}
-                    {saveStatus === 'saving' ? 'Đang lưu…'
-                     : saveStatus === 'saved'  ? 'Đã lưu cấu hình'
-                     : saveStatus === 'error'  ? 'Lưu thất bại — thử lại'
+                    {saveStatus === 'saved'    && <span>✓</span>}
+                    {saveStatus === 'error'    && <span>✕</span>}
+                    {saveStatus === 'nochange' && <span>•</span>}
+                    {saveStatus === 'idle' && configDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber" />}
+                    {saveStatus === 'saving'   ? 'Đang lưu…'
+                     : saveStatus === 'saved'    ? 'Đã lưu cấu hình'
+                     : saveStatus === 'error'    ? 'Lưu thất bại — thử lại'
+                     : saveStatus === 'nochange' ? 'Không có thay đổi'
+                     : configDirty ? 'Lưu cấu hình giáo án *'
                      : 'Lưu cấu hình giáo án'}
                   </button>
                 )}
@@ -1857,6 +1897,40 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               {addOpen ? '✕ Đóng' : '+ Thêm bài tập'}
             </Button>
           </div>
+
+          {/* Orphan-recovery banner — exercises that lost their day (e.g. from a
+              previous split-type change). They still exist; re-attach them here. */}
+          {splitType && orphanExercises.length > 0 && (
+            <div className="rounded-xl border border-amber/30 bg-amber/5 px-4 py-3 space-y-2">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber/90">
+                    ⚠ {orphanExercises.length} bài tập chưa thuộc ngày nào
+                  </p>
+                  <p className="text-xs text-ink/55 mt-0.5">
+                    Có thể do đổi kiểu chương trình trước đó. Khôi phục bằng cách chuyển chúng vào một ngày hiện có.
+                  </p>
+                </div>
+                {activeDay && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void assignOrphansToActiveDay()}
+                    className="shrink-0"
+                  >
+                    Chuyển tất cả vào “{activeDay.label}”
+                  </Button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {orphanExercises.map(pe => (
+                  <span key={pe.id} className="inline-flex items-center rounded-md bg-white border border-ink/10 px-2 py-0.5 text-[11px] text-ink/70">
+                    {pe.exercise?.name ?? '—'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <div className="flex items-center justify-center py-8">
