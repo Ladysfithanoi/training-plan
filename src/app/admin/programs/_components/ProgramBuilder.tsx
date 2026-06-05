@@ -9,6 +9,8 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { Input } from '@/components/ui/Input'
 import { PhaseTimeline } from '@/components/programs/PhaseTimeline'
 import { RepRangeMatrix } from '@/components/programs/RepRangeMatrix'
+import { HelpTip } from '@/components/ui/HelpTip'
+import { GLOSSARY } from '@/lib/glossary'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import { SPLIT_CONFIGS } from '@/lib/trainingSplit'
 import type { SplitType } from '@/lib/trainingSplit'
@@ -437,8 +439,9 @@ export function ProgramBuilder({
 
                 {(selectedBlock.phases ?? []).some(p => p.phase_type === 'training') && (
                   <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-ink/50 mb-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-ink/50 mb-3 flex items-center gap-1.5">
                       Ma trận vùng Reps
+                      <HelpTip text={GLOSSARY.repZones.def} />
                     </h3>
                     <Card>
                       <CardBody>
@@ -450,7 +453,10 @@ export function ProgramBuilder({
 
                 {/* Periodization summary — tabular row-by-row layout */}
                 <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
-                  <h3 className="text-xl font-bold text-slate-800 mb-6">Cấu trúc Phân kỳ</h3>
+                  <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+                    Cấu trúc Phân kỳ
+                    <HelpTip text={GLOSSARY.meso.def} />
+                  </h3>
 
                   {/* Column headers */}
                   <div className="grid grid-cols-12 gap-4 items-center pb-2 mb-1 border-b border-slate-100 text-[10px] font-semibold uppercase tracking-wider text-slate-400">

@@ -3,6 +3,8 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDate, cn } from '@/lib/utils'
+import { HelpTip } from '@/components/ui/HelpTip'
+import { GLOSSARY } from '@/lib/glossary'
 import { buildNextWeekSuggestion } from '@/lib/autoregulation'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
 import type {
@@ -872,7 +874,10 @@ export function WorkoutLogger({
       {!isCompleted && (
         <div className="rounded-2xl border border-ink/10 bg-white overflow-hidden">
           <div className="px-4 pt-4 pb-3 border-b border-ink/6">
-            <h3 className="text-sm font-bold text-ink">Đánh giá buổi tập</h3>
+            <h3 className="text-sm font-bold text-ink flex items-center gap-1.5">
+              Đánh giá buổi tập
+              <HelpTip text={GLOSSARY.autoregulation.def} />
+            </h3>
             <p className="text-[11px] text-ink/40 mt-0.5">
               Autoregulation · Eric Helms — xác định kế hoạch tải tuần sau
             </p>
