@@ -304,6 +304,18 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [splitType, setSplitType]     = useState<SplitType | null>(null)
   const [splitDays, setSplitDays]     = useState<SplitDay[]>([])
   const [activeDayId, setActiveDayId] = useState<string | null>(null)
+
+  // ── Orphan recovery (selectable) ──────────────────────────────────────────────
+  // Coach can tick individual orphaned exercises and route them to any chosen day,
+  // instead of being forced to dump them all into the active day at once.
+  const [selectedOrphanIds, setSelectedOrphanIds] = useState<Set<string>>(new Set())
+  const [orphanTargetDayId, setOrphanTargetDayId] = useState<string | null>(null)
+  const [assigningOrphans, setAssigningOrphans]   = useState(false)
+
+  // ── Copy a whole day's exercises into the active day ───────────────────────────
+  // Similar sessions (e.g. two "Push" days) can be cloned in one click.
+  const [copySourceDayId, setCopySourceDayId] = useState<string | null>(null)
+  const [copyingDay, setCopyingDay]           = useState(false)
   // The last-committed (DB) split config. Used to (a) restore exact saved days
   // when the coach re-selects the saved type after previewing another, and
   // (b) detect "no changes" on save. Split config is a DRAFT: it only persists
@@ -618,6 +630,10 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setAddingDay(false)
     setSaveStatus('idle')
     setEditingOLId(null)
+    // Reset orphan-recovery & copy-day selections for the new phase context.
+    setSelectedOrphanIds(new Set())
+    setOrphanTargetDayId(null)
+    setCopySourceDayId(null)
     // Migration 006: sync week_type from newly selected phase
     const newWeekType = (phase?.week_type ?? 'standard') as WeekType
     setPhaseWeekType(newWeekType)
@@ -1294,6 +1310,92 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     ))
   }
 
+  // ── Orphan recovery — selectable subset → chosen day ──────────────────────────
+  function toggleOrphanSelection(id: string) {
+    setSelectedOrphanIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAllOrphans() {
+    setSelectedOrphanIds(prev =>
+      prev.size === orphanExercises.length
+        ? new Set()
+        : new Set(orphanExercises.map(e => e.id)),
+    )
+  }
+
+  /** Move only the ticked orphans to the coach-chosen target day. */
+  async function assignSelectedOrphansToDay() {
+    const targetDayId = orphanTargetDayId ?? activeDayId
+    const ids = orphanExercises
+      .filter(e => selectedOrphanIds.has(e.id))
+      .map(e => e.id)
+    if (!targetDayId || ids.length === 0) return
+
+    setAssigningOrphans(true)
+    setPhaseExercises(prev =>
+      prev.map(pe => ids.includes(pe.id) ? { ...pe, day_id: targetDayId } : pe),
+    )
+    setSelectedOrphanIds(new Set())
+    await Promise.all(ids.map(id =>
+      fetch(`/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ day_id: targetDayId }),
+      }),
+    ))
+    setAssigningOrphans(false)
+  }
+
+  // ── Copy every exercise of another day into the active day ─────────────────────
+  // Duplicates the source day's prescription rows (new phase_exercise rows pinned
+  // to activeDayId) so similar sessions don't have to be rebuilt by hand.
+  async function copyDayExercises() {
+    if (!activeDayId || !copySourceDayId || copySourceDayId === activeDayId) return
+    const source = phaseExercises
+      .filter(pe => pe.day_id === copySourceDayId)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    if (source.length === 0) return
+
+    setCopyingDay(true)
+    // Horizontal labels continue from however many the active day already has.
+    let horizCount = phaseExercises.filter(pe => pe.day_id === activeDayId).length
+
+    for (const pe of source) {
+      const isVertical = pe.loading_style === 'vertical'
+      const label = isVertical
+        ? pe.order_label
+        : computeHorizontalLabel(horizCount++)
+      const res = await fetch(`/api/phases/${selectedPhaseId}/exercises`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exercise_id:           pe.exercise_id,
+          target_sets:           pe.target_sets,
+          target_rep_min:        pe.target_rep_min,
+          target_rep_max:        pe.target_rep_max,
+          rir_target:            pe.rir_target,
+          day_id:                activeDayId,
+          order_label:           label,
+          loading_style:         pe.loading_style ?? 'horizontal',
+          is_amrap:              pe.is_amrap,
+          target_percentage_1rm: pe.target_percentage_1rm,
+          notes:                 pe.notes,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setPhaseExercises(prev => [...prev, data.exercise])
+      }
+    }
+    setCopySourceDayId(null)
+    setCopyingDay(false)
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -1898,39 +2000,147 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
             </Button>
           </div>
 
+          {/* Copy-from-another-day — clone a similar session's exercises into the
+              active day in one click. Only days that actually have exercises are
+              offered as a source. */}
+          {splitType && activeDay && (() => {
+            const sourceDays = splitDays.filter(
+              d => d.id !== activeDayId &&
+                   phaseExercises.some(pe => pe.day_id === d.id),
+            )
+            if (sourceDays.length === 0) return null
+            return (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ink/8 bg-ink/3 px-4 py-2.5">
+                <span className="text-xs text-ink/55">
+                  Sao chép bài tập từ ngày khác vào “<span className="font-semibold text-ink">{activeDay.label}</span>”:
+                </span>
+                <select
+                  value={copySourceDayId ?? ''}
+                  onChange={e => setCopySourceDayId(e.target.value || null)}
+                  className="rounded-lg border border-ink/15 bg-white px-2.5 py-1 text-xs text-ink focus:outline-none focus:border-amber"
+                >
+                  <option value="">— Chọn ngày nguồn —</option>
+                  {sourceDays.map(d => {
+                    const n = phaseExercises.filter(pe => pe.day_id === d.id).length
+                    return (
+                      <option key={d.id} value={d.id}>
+                        {d.label} ({n} bài)
+                      </option>
+                    )
+                  })}
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void copyDayExercises()}
+                  disabled={!copySourceDayId || copyingDay}
+                >
+                  {copyingDay ? 'Đang sao chép…' : 'Sao chép'}
+                </Button>
+              </div>
+            )
+          })()}
+
           {/* Orphan-recovery banner — exercises that lost their day (e.g. from a
-              previous split-type change). They still exist; re-attach them here. */}
-          {splitType && orphanExercises.length > 0 && (
-            <div className="rounded-xl border border-amber/30 bg-amber/5 px-4 py-3 space-y-2">
+              previous split-type change). They still exist; re-attach them here.
+              Coach ticks the ones to move, picks a target day, then confirms. */}
+          {splitType && orphanExercises.length > 0 && (() => {
+            const selectedCount = orphanExercises.filter(e => selectedOrphanIds.has(e.id)).length
+            const effectiveTargetId = orphanTargetDayId ?? activeDayId
+            const targetDay = splitDays.find(d => d.id === effectiveTargetId) ?? null
+            return (
+            <div className="rounded-xl border border-amber/30 bg-amber/5 px-4 py-3 space-y-3">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-amber/90">
                     ⚠ {orphanExercises.length} bài tập chưa thuộc ngày nào
                   </p>
                   <p className="text-xs text-ink/55 mt-0.5">
-                    Có thể do đổi kiểu chương trình trước đó. Khôi phục bằng cách chuyển chúng vào một ngày hiện có.
+                    Chọn bài tập rồi chọn ngày để chuyển vào — hoặc chuyển tất cả vào ngày đang xem.
                   </p>
                 </div>
-                {activeDay && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllOrphans}
+                    className="text-xs font-semibold text-ink/55 hover:text-ink px-2 py-1 rounded hover:bg-ink/5 transition-colors"
+                  >
+                    {selectedCount === orphanExercises.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                  </button>
+                  {activeDay && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void assignOrphansToActiveDay()}
+                      disabled={assigningOrphans}
+                    >
+                      Chuyển tất cả vào “{activeDay.label}”
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Selectable exercise chips — click to toggle the green check */}
+              <div className="flex flex-wrap gap-1.5">
+                {orphanExercises.map(pe => {
+                  const checked = selectedOrphanIds.has(pe.id)
+                  return (
+                    <button
+                      key={pe.id}
+                      type="button"
+                      onClick={() => toggleOrphanSelection(pe.id)}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors',
+                        checked
+                          ? 'border-herb bg-herb/10 text-herb font-semibold'
+                          : 'border-ink/10 bg-white text-ink/70 hover:border-ink/25',
+                      )}
+                    >
+                      <span className={cn(
+                        'flex h-3.5 w-3.5 items-center justify-center rounded-[4px] border text-[9px] leading-none',
+                        checked ? 'border-herb bg-herb text-white' : 'border-ink/25 bg-white',
+                      )}>
+                        {checked ? '✓' : ''}
+                      </span>
+                      {pe.exercise?.name ?? '—'}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Target-day picker + confirm — only meaningful once something is ticked */}
+              {selectedCount > 0 && (
+                <div className="flex flex-wrap items-center gap-2 border-t border-amber/20 pt-2.5">
+                  <span className="text-xs text-ink/55">
+                    Chuyển <span className="font-semibold text-ink">{selectedCount}</span> bài đã chọn vào:
+                  </span>
+                  {splitDays.map(day => (
+                    <button
+                      key={day.id}
+                      type="button"
+                      onClick={() => setOrphanTargetDayId(day.id)}
+                      className={cn(
+                        'rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all',
+                        effectiveTargetId === day.id
+                          ? 'border-amber bg-amber/10 text-amber'
+                          : 'border-ink/12 text-ink/55 hover:border-ink/25 hover:text-ink',
+                      )}
+                    >
+                      {day.label}
+                    </button>
+                  ))}
                   <Button
                     size="sm"
-                    variant="secondary"
-                    onClick={() => void assignOrphansToActiveDay()}
-                    className="shrink-0"
+                    onClick={() => void assignSelectedOrphansToDay()}
+                    disabled={assigningOrphans || !effectiveTargetId}
                   >
-                    Chuyển tất cả vào “{activeDay.label}”
+                    {assigningOrphans ? 'Đang chuyển…' : `Chuyển vào “${targetDay?.label ?? '—'}”`}
                   </Button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {orphanExercises.map(pe => (
-                  <span key={pe.id} className="inline-flex items-center rounded-md bg-white border border-ink/10 px-2 py-0.5 text-[11px] text-ink/70">
-                    {pe.exercise?.name ?? '—'}
-                  </span>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
-          )}
+            )
+          })()}
 
           {loading ? (
             <div className="flex items-center justify-center py-8">
