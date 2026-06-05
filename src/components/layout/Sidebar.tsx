@@ -42,17 +42,18 @@ const navItems: NavItem[] = [
     icon:  <Icon d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />,
   },
   {
-    href:  '/programs',
-    label: 'Chương trình của tôi',
-    icon:  <Icon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />,
-  },
-  {
     // Promoted from admin section — coaches now land here for their personal
     // training log (week selector → day tabs → exercise matrix → survey).
+    // Placed above "Chương trình của tôi" so staff reach their own schedule first.
     href:      '/admin/my-training',
     label:     'Lịch tập của tôi',
     adminOnly: true,
     icon:      <Icon d="M5 8.5V15.5M19 8.5V15.5M7.5 12H16.5M7.5 8.5a1.5 1.5 0 00-3 0v7a1.5 1.5 0 003 0M16.5 8.5a1.5 1.5 0 013 0v7a1.5 1.5 0 01-3 0" />,
+  },
+  {
+    href:  '/programs',
+    label: 'Chương trình của tôi',
+    icon:  <Icon d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />,
   },
   {
     href:  '/progress',

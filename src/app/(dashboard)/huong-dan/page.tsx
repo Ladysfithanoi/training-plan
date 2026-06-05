@@ -17,6 +17,16 @@ const COACH_STEPS: Step[] = [
   { title: 'Theo dõi tiến độ', desc: 'Xem “Bảng điều khiển HLV” cho hoạt động gần đây, hoặc mở “📊 Tiến độ” của từng học viên để xem biểu đồ khối lượng & e1RM.' },
 ]
 
+// Coach/Admin training FOR THEMSELVES — distinct from building/assigning to students.
+const COACH_SELF_STEPS: Step[] = [
+  { title: 'Mở “Lịch tập của tôi”', desc: 'Mục này nằm trên thanh menu bên trái (chỉ HLV/Admin thấy) — đây là nơi bạn tự tập theo giáo án, giống như một học viên.' },
+  { title: 'Chuẩn bị khối tập', desc: 'Khối tập phải có sẵn trong “Giáo án tập luyện” (do bạn tạo hoặc dùng chung) thì mới chọn được cho bản thân ở bước sau.' },
+  { title: 'Chọn khối tập cho bản thân', desc: 'Lần đầu vào, ở “Chọn khối tập để bắt đầu” → tìm/lọc khối muốn theo → bấm “Bắt đầu chương trình” để kích hoạt cho chính mình.' },
+  { title: 'Tập theo tuần & ngày', desc: 'Chọn tuần và ngày tập, rồi nhập số reps và mức tạ cho từng hiệp trong bảng bài tập. Cột “Mục tiêu” cho biết reps & RIR cần đạt.' },
+  { title: 'Đánh giá cuối buổi', desc: 'Hoàn thành “Đánh giá buổi tập” để app gợi ý điều chỉnh tải cho tuần sau (autoregulation).' },
+  { title: 'Đổi khối tập khi cần', desc: 'Muốn theo giáo án khác? Bấm nút “Đổi” ở đầu trang “Lịch tập của tôi” để chọn lại khối tập.' },
+]
+
 const STUDENT_STEPS: Step[] = [
   { title: 'Xem chương trình', desc: 'Mở “Chương trình của tôi” để xem khối tập, các giai đoạn và bài tập HLV đã giao.' },
   { title: 'Ghi buổi tập', desc: 'Trong mỗi buổi, nhập số reps và mức tạ cho từng hiệp. Cột “Mục tiêu” cho biết reps & RIR cần đạt.' },
@@ -85,7 +95,7 @@ export default async function GuidePage() {
       {/* Quick start */}
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
-          Bắt đầu nhanh
+          {isStaff ? 'Bắt đầu nhanh — Quản lý học viên' : 'Bắt đầu nhanh'}
         </h2>
         <Card>
           <CardBody>
@@ -93,6 +103,24 @@ export default async function GuidePage() {
           </CardBody>
         </Card>
       </section>
+
+      {/* Coach/Admin: train for yourself */}
+      {isStaff && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
+            Tự chọn lịch tập cho bản thân
+          </h2>
+          <p className="text-sm text-ink/55 -mt-2 mb-4 leading-relaxed">
+            HLV/Admin cũng có thể tự tập theo giáo án giống học viên. Các bước dưới đây hướng dẫn cách
+            chọn và theo dõi lịch tập của riêng bạn trong mục “Lịch tập của tôi”.
+          </p>
+          <Card>
+            <CardBody>
+              <StepList steps={COACH_SELF_STEPS} />
+            </CardBody>
+          </Card>
+        </section>
+      )}
 
       {/* Glossary */}
       <section>
