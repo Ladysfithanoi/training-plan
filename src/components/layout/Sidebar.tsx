@@ -146,16 +146,6 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
             >
               {item.icon}
               <span className="hidden md:inline truncate">{item.label}</span>
-              {item.highlight && (
-                <span
-                  className={cn(
-                    'ml-auto hidden md:inline text-[10px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5',
-                    isActive(item.href) ? 'bg-paper/20 text-paper' : 'bg-amber/20 text-amber',
-                  )}
-                >
-                  Bắt đầu
-                </span>
-              )}
               {/* Collapsed (mobile) — a small star dot marks the highlighted item */}
               {item.highlight && (
                 <span className="md:hidden absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber ring-2 ring-white" />
