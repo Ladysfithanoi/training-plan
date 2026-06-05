@@ -19,7 +19,7 @@ import {
   PATTERN_NAMES_BY_DAY,
 } from '@/lib/trainingSplit'
 import type { SplitType, SplitDay, DayType } from '@/lib/trainingSplit'
-import type { Phase, Exercise, MovementPattern, PhaseExercise, WeekType, PhaseType, TrainingBlock } from '@/types'
+import type { Phase, Exercise, MovementPattern, PhaseExercise, WeekType, PhaseType, TrainingBlock, RepRange } from '@/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -370,6 +370,19 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [editTarget1rmPct, setEditTarget1rmPct] = useState('')
   const [editSaving, setEditSaving]             = useState(false)
   const [editError, setEditError]               = useState<string | null>(null)
+
+  // ── Edit phase PARAMETERS modal (duration, frequency, rep zones, type…) ──────
+  const [paramsPhaseId, setParamsPhaseId]     = useState<string | null>(null)
+  const [pPhaseType, setPPhaseType]           = useState<PhaseType>('training')
+  const [pDuration, setPDuration]             = useState('4')
+  const [pFreq, setPFreq]                     = useState('3')
+  const [pRepRanges, setPRepRanges]           = useState<RepRange[]>([])
+  const [pReductionPct, setPReductionPct]     = useState('33')   // maintenance: % of Meso-2 volume
+  const [pIncludesDeload, setPIncludesDeload] = useState(false)
+  const [pMaxRir, setPMaxRir]                 = useState('10')   // active rest
+  const [pMaxWeightPct, setPMaxWeightPct]     = useState('50')   // active rest: % of working weight
+  const [pSaving, setPSaving]                 = useState(false)
+  const [pError, setPError]                   = useState<string | null>(null)
 
   // ── Derived values ───────────────────────────────────────────────────────────
   /**
@@ -1011,6 +1024,89 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     })
   }
 
+  // ── Edit phase parameters ────────────────────────────────────────────────────
+  const EXERCISE_TYPE_OPTIONS = [
+    { value: '',           label: 'Mọi loại bài' },
+    { value: 'compound',   label: 'Phức hợp' },
+    { value: 'machine',    label: 'Máy tập' },
+    { value: 'cable',      label: 'Cáp' },
+    { value: 'bodyweight', label: 'Trọng lượng cơ thể' },
+    { value: 'dumbbell',   label: 'Tạ đơn' },
+  ]
+
+  function openPhaseParams(phase: Phase) {
+    setParamsPhaseId(phase.id)
+    setPPhaseType(phase.phase_type)
+    setPDuration(String(phase.duration_weeks))
+    setPFreq(String(phase.frequency_per_week))
+    setPRepRanges(Array.isArray(phase.rep_ranges) ? phase.rep_ranges.map(r => ({ ...r })) : [])
+    setPReductionPct(String(Math.round((phase.target_set_reduction_factor ?? 1) * 100)))
+    setPIncludesDeload(!!phase.includes_deload)
+    setPMaxRir(phase.max_rir != null ? String(phase.max_rir) : '10')
+    setPMaxWeightPct(phase.max_weight_percent != null ? String(Math.round(phase.max_weight_percent * 100)) : '50')
+    setPError(null)
+  }
+
+  function addRepZone() {
+    setPRepRanges(prev => [...prev, { min: 8, max: 12 }])
+  }
+  function updateRepZone(idx: number, patch: Partial<RepRange>) {
+    setPRepRanges(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
+  }
+  function removeRepZone(idx: number) {
+    setPRepRanges(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  async function savePhaseParams() {
+    if (!paramsPhaseId) return
+    setPSaving(true)
+    setPError(null)
+
+    const cleanRanges: RepRange[] = pRepRanges
+      .map(r => {
+        const min = Number(r.min) || 0
+        const max = Number(r.max) || 0
+        return r.exercise_type ? { min, max, exercise_type: r.exercise_type } : { min, max }
+      })
+      .filter(r => r.min > 0 && r.max >= r.min)
+
+    const payload = {
+      phase_type:                  pPhaseType,
+      duration_weeks:              Math.max(1, parseInt(pDuration) || 1),
+      frequency_per_week:          Math.max(1, parseInt(pFreq) || 1),
+      rep_ranges:                  cleanRanges,
+      target_set_reduction_factor: pPhaseType === 'maintenance'
+        ? (Math.max(1, parseInt(pReductionPct) || 100) / 100)
+        : 1.0,
+      includes_deload:             pPhaseType === 'maintenance' ? pIncludesDeload : false,
+      max_rir:                     pPhaseType === 'active_rest' ? (parseInt(pMaxRir) || null) : null,
+      max_weight_percent:          pPhaseType === 'active_rest'
+        ? (Math.max(1, parseInt(pMaxWeightPct) || 50) / 100)
+        : null,
+    }
+
+    // Optimistic local update so the info bar + timeline reflect changes at once.
+    setLocalBlocks(prev => prev.map(b =>
+      b.id === selectedBlockId
+        ? { ...b, phases: (b.phases ?? []).map(p => p.id === paramsPhaseId ? { ...p, ...payload } : p) }
+        : b,
+    ))
+
+    const res = await fetch(`/api/phases/${paramsPhaseId}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    })
+
+    setPSaving(false)
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}))
+      setPError(d.error ?? 'Lưu thất bại. Vui lòng thử lại.')
+      return
+    }
+    setParamsPhaseId(null)
+  }
+
   async function doDeletePhase(phaseId: string) {
     const res = await fetch(`/api/phases/${phaseId}`, { method: 'DELETE' })
     if (res.ok || res.status === 204) {
@@ -1284,6 +1380,20 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 {rr.exercise_type ? ` (${rr.exercise_type})` : ''}
               </span>
             ))}
+
+            {/* Sửa toàn bộ thông số giai đoạn (khoảng reps, độ dài, tần suất…) */}
+            <button
+              type="button"
+              onClick={() => openPhaseParams(selectedPhase)}
+              title="Chỉnh sửa thông số giai đoạn"
+              className="inline-flex items-center gap-1 rounded-md border border-ink/15 px-2 py-1 text-[11px] font-semibold text-ink/60 hover:border-amber hover:text-amber hover:bg-amber/5 transition-colors"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+              Sửa thông số
+            </button>
 
             {/* ── Tính chất Tuần tập (migration 006) ───────────────────────── */}
             <div className="flex items-center gap-1.5 ml-auto">
@@ -2542,6 +2652,155 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         onConfirm={() => void executePendingDelete()}
         onCancel={() => setPendingDelete(null)}
       />
+
+      {/* ── Edit phase parameters modal ──────────────────────────────────────── */}
+      <Modal
+        open={paramsPhaseId !== null}
+        onClose={() => setParamsPhaseId(null)}
+        title="Chỉnh sửa thông số giai đoạn"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <Select
+            label="Loại giai đoạn"
+            value={pPhaseType}
+            onChange={e => setPPhaseType(e.target.value as PhaseType)}
+            options={[
+              { value: 'training',    label: 'Tập luyện' },
+              { value: 'maintenance', label: 'Duy trì' },
+              { value: 'active_rest', label: 'Nghỉ tích cực' },
+            ]}
+          />
+
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Độ dài (tuần)"
+              type="number"
+              min={1}
+              value={pDuration}
+              onChange={e => setPDuration(e.target.value)}
+            />
+            <Input
+              label="Tần suất / tuần"
+              type="number"
+              min={1}
+              value={pFreq}
+              onChange={e => setPFreq(e.target.value)}
+            />
+          </div>
+
+          {/* Rep zones editor */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                Khoảng Reps (vùng reps)
+              </label>
+              <button
+                type="button"
+                onClick={addRepZone}
+                className="text-xs font-semibold text-amber hover:underline"
+              >
+                + Thêm vùng
+              </button>
+            </div>
+            {pRepRanges.length === 0 ? (
+              <p className="text-xs text-ink/40">Chưa có vùng reps nào. Bấm “+ Thêm vùng”.</p>
+            ) : (
+              <div className="space-y-2">
+                {pRepRanges.map((rr, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      type="number" min={1} value={rr.min}
+                      onChange={e => updateRepZone(i, { min: parseInt(e.target.value) || 0 })}
+                      className="w-16 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-center font-mono focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+                      aria-label="Reps tối thiểu"
+                    />
+                    <span className="text-ink/30">–</span>
+                    <input
+                      type="number" min={1} value={rr.max}
+                      onChange={e => updateRepZone(i, { max: parseInt(e.target.value) || 0 })}
+                      className="w-16 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-center font-mono focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+                      aria-label="Reps tối đa"
+                    />
+                    <select
+                      value={rr.exercise_type ?? ''}
+                      onChange={e => updateRepZone(i, { exercise_type: (e.target.value || undefined) as RepRange['exercise_type'] })}
+                      className="flex-1 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-ink bg-white focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+                    >
+                      {EXERCISE_TYPE_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeRepZone(i)}
+                      title="Xoá vùng reps"
+                      className="h-8 w-8 shrink-0 rounded flex items-center justify-center text-danger/50 hover:text-danger hover:bg-danger/8 transition-colors"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Maintenance-specific */}
+          {pPhaseType === 'maintenance' && (
+            <div className="grid grid-cols-2 gap-4 rounded-lg bg-ink/3 border border-ink/8 p-3">
+              <Input
+                label="% khối lượng (so với Meso-2)"
+                type="number"
+                min={1}
+                value={pReductionPct}
+                onChange={e => setPReductionPct(e.target.value)}
+              />
+              <label className="flex items-center gap-2 self-end pb-2 text-sm text-ink/70">
+                <input
+                  type="checkbox"
+                  checked={pIncludesDeload}
+                  onChange={e => setPIncludesDeload(e.target.checked)}
+                  className="accent-amber h-4 w-4"
+                />
+                Kết thúc bằng tuần deload
+              </label>
+            </div>
+          )}
+
+          {/* Active-rest-specific */}
+          {pPhaseType === 'active_rest' && (
+            <div className="grid grid-cols-2 gap-4 rounded-lg bg-ink/3 border border-ink/8 p-3">
+              <Input
+                label="RIR tối đa"
+                type="number"
+                min={0}
+                value={pMaxRir}
+                onChange={e => setPMaxRir(e.target.value)}
+              />
+              <Input
+                label="% trọng lượng tối đa"
+                type="number"
+                min={1}
+                value={pMaxWeightPct}
+                onChange={e => setPMaxWeightPct(e.target.value)}
+              />
+            </div>
+          )}
+
+          {pError && <p className="text-sm text-danger">{pError}</p>}
+
+          <div className="flex gap-2 pt-1">
+            <Button variant="primary" loading={pSaving} onClick={() => void savePhaseParams()} className="flex-1">
+              Lưu thay đổi
+            </Button>
+            <Button variant="secondary" onClick={() => setParamsPhaseId(null)} disabled={pSaving}>
+              Huỷ
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
