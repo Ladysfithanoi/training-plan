@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
@@ -81,14 +81,19 @@ const PRESETS = {
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
+type BlockWithPhases = TrainingBlock & { phases: Phase[] }
+
 interface ProgramBuilderProps {
-  blocks: TrainingBlock[]
+  /** Controlled by ProgramsWorkspace — the shared blocks state. */
+  blocks: BlockWithPhases[]
   exercises: Exercise[]
   patterns: MovementPattern[]
   /** Controlled: ID of the block currently highlighted. Owned by ProgramsWorkspace. */
   selectedBlockId: string
   /** Notify the workspace that the user changed active block. */
   onBlockSelect: (id: string) => void
+  /** Mutate the shared blocks state (create / delete). */
+  onBlocksChange: (updater: (prev: BlockWithPhases[]) => BlockWithPhases[]) => void
   currentUserId: string
   isAdmin: boolean
 }
@@ -96,19 +101,19 @@ interface ProgramBuilderProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ProgramBuilder({
-  blocks: initialBlocks,
+  blocks,
   exercises,
   patterns,
   selectedBlockId,
   onBlockSelect,
+  onBlocksChange,
   currentUserId,
   isAdmin,
 }: ProgramBuilderProps) {
   const router = useRouter()
-  const [blocks, setBlocks] = useState(initialBlocks)
 
   /** Coaches may edit/delete only blocks they created; admins edit anything. */
-  const canEdit = (b: TrainingBlock) => isAdmin || b.created_by === currentUserId
+  const canEdit = (b: BlockWithPhases) => isAdmin || b.created_by === currentUserId
 
   // ── Sort + pagination state ────────────────────────────────────────────────
   const [sortKey,     setSortKey]     = useState<SortKey>('date_desc')
@@ -125,11 +130,6 @@ export function ProgramBuilder({
   // ── Delete confirmation (replaces window.confirm) ──────────────────────────
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const confirmDeleteBlock = blocks.find(b => b.id === confirmDeleteId) ?? null
-
-  // Sync local blocks when server re-fetches (router.refresh after create).
-  // Deliberate prop→state sync; the rule's perf concern doesn't apply here.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setBlocks(initialBlocks) }, [initialBlocks])
 
   // ── Sort-then-paginate pipeline ───────────────────────────────────────────
   const sortedBlocks    = sortBlocks(blocks, sortKey)
@@ -186,7 +186,7 @@ export function ProgramBuilder({
       }
 
       const { block } = data
-      setBlocks(prev => [block, ...prev])
+      onBlocksChange(prev => [block, ...prev])
       onBlockSelect(block.id)
       // New block is newest → switch to date_desc so it lands on page 1
       setSortKey('date_desc')
@@ -208,7 +208,7 @@ export function ProgramBuilder({
     const res = await fetch(`/api/programs/${blockId}`, { method: 'DELETE' })
     if (res.ok) {
       const newBlocks     = blocks.filter(b => b.id !== blockId)
-      setBlocks(newBlocks)
+      onBlocksChange(prev => prev.filter(b => b.id !== blockId))
       if (selectedBlockId === blockId) onBlockSelect(newBlocks[0]?.id ?? '')
       // Clamp page if last page becomes empty
       const newTotalPages = Math.max(1, Math.ceil(newBlocks.length / ITEMS_PER_PAGE))

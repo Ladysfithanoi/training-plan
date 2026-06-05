@@ -244,6 +244,9 @@ interface Props {
   /** Controlled: the block currently active in section 1.  This component is
    *  read-only with respect to block selection — ProgramsWorkspace owns it. */
   selectedBlockId: string
+  /** Push phase/block mutations up to the shared state so section 1
+   *  (structure / timeline / rep-matrix) updates in lock-step. */
+  onBlocksChange: (updater: (prev: BlockWithPhases[]) => BlockWithPhases[]) => void
 }
 
 interface PhaseExerciseRow extends PhaseExercise {
@@ -254,7 +257,7 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBlockId }: Props) {
+export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBlockId, onBlocksChange }: Props) {
 
   // ── Local block mirror ───────────────────────────────────────────────────────
   // Keeps a mutable copy so phase CRUD (add / rename / delete meso) is reflected
@@ -269,6 +272,16 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   useEffect(() => {
     setLocalBlocks(blocks)
   }, [blocks]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Apply a block mutation to BOTH the local mirror and the shared parent state.
+   * Keeping the parent in sync makes section 1 (structure / timeline / rep-matrix)
+   * reflect phase-parameter edits made here immediately.
+   */
+  function updateBlocks(updater: (prev: BlockWithPhases[]) => BlockWithPhases[]) {
+    setLocalBlocks(updater)
+    onBlocksChange(updater)
+  }
 
   // ── Phase selection ─────────────────────────────────────────────────────────
   const [selectedPhaseId, setSelectedPhaseId] = useState<string>(() => {
@@ -982,7 +995,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
     const newPhase = data.phase as Phase
     // Optimistic: add the new phase to localBlocks, then switch to it
-    setLocalBlocks(prev => prev.map(b =>
+    updateBlocks(prev => prev.map(b =>
       b.id === selectedBlockId
         ? { ...b, phases: [...(b.phases ?? []), newPhase] }
         : b,
@@ -1011,7 +1024,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setRenamingPhaseId(null)
 
     // Optimistic update
-    setLocalBlocks(prev => prev.map(b =>
+    updateBlocks(prev => prev.map(b =>
       b.id === selectedBlockId
         ? { ...b, phases: (b.phases ?? []).map(p => p.id === phaseId ? { ...p, name: newName } : p) }
         : b,
@@ -1086,7 +1099,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     }
 
     // Optimistic local update so the info bar + timeline reflect changes at once.
-    setLocalBlocks(prev => prev.map(b =>
+    updateBlocks(prev => prev.map(b =>
       b.id === selectedBlockId
         ? { ...b, phases: (b.phases ?? []).map(p => p.id === paramsPhaseId ? { ...p, ...payload } : p) }
         : b,
@@ -1110,7 +1123,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   async function doDeletePhase(phaseId: string) {
     const res = await fetch(`/api/phases/${phaseId}`, { method: 'DELETE' })
     if (res.ok || res.status === 204) {
-      setLocalBlocks(prev => prev.map(b =>
+      updateBlocks(prev => prev.map(b =>
         b.id === selectedBlockId
           ? { ...b, phases: (b.phases ?? []).filter(p => p.id !== phaseId) }
           : b,

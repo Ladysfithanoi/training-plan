@@ -14,7 +14,7 @@
  * leakage bug and the redundant sub-selector in section 2.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ProgramBuilder } from './ProgramBuilder'
 import { PhaseExerciseBuilder } from './PhaseExerciseBuilder'
 import type { TrainingBlock, Exercise, MovementPattern, Phase } from '@/types'
@@ -29,10 +29,18 @@ interface ProgramsWorkspaceProps {
   isAdmin: boolean
 }
 
-export function ProgramsWorkspace({ blocks, exercises, patterns, currentUserId, isAdmin }: ProgramsWorkspaceProps) {
+export function ProgramsWorkspace({ blocks: initialBlocks, exercises, patterns, currentUserId, isAdmin }: ProgramsWorkspaceProps) {
+  // Single source of truth for the blocks (with phases), shared by BOTH sections
+  // so an edit in section 2 (PhaseExerciseBuilder) instantly updates the
+  // structure/timeline/rep-matrix in section 1 (ProgramBuilder).
+  const [blocks, setBlocks] = useState<BlockWithPhases[]>(initialBlocks)
+  // Re-sync when the server re-fetches (router.refresh after create/delete).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setBlocks(initialBlocks) }, [initialBlocks])
+
   // Prefer first block that has at least one phase; otherwise fall back to first block.
   const [selectedBlockId, setSelectedBlockId] = useState<string>(
-    (blocks.find(b => (b.phases ?? []).length > 0) ?? blocks[0])?.id ?? '',
+    (initialBlocks.find(b => (b.phases ?? []).length > 0) ?? initialBlocks[0])?.id ?? '',
   )
 
   // Coaches may only edit blocks they created; admins may edit anything.
@@ -49,11 +57,12 @@ export function ProgramsWorkspace({ blocks, exercises, patterns, currentUserId, 
           Cấu trúc Khối Tập Luyện
         </h2>
         <ProgramBuilder
-          blocks={blocks as TrainingBlock[]}
+          blocks={blocks}
           exercises={exercises}
           patterns={patterns}
           selectedBlockId={selectedBlockId}
           onBlockSelect={setSelectedBlockId}
+          onBlocksChange={setBlocks}
           currentUserId={currentUserId}
           isAdmin={isAdmin}
         />
@@ -77,6 +86,7 @@ export function ProgramsWorkspace({ blocks, exercises, patterns, currentUserId, 
                 exercises={exercises}
                 patterns={patterns}
                 selectedBlockId={selectedBlockId}
+                onBlocksChange={setBlocks}
               />
             </>
           ) : (
