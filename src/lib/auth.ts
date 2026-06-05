@@ -28,6 +28,15 @@ export async function requireAdmin(): Promise<Profile> {
   return profile
 }
 
+/** Throws if the current user is not staff (admin or coach/HLV) */
+export async function requireStaff(): Promise<Profile> {
+  const profile = await getProfile()
+  if (!profile || (profile.role !== 'admin' && profile.role !== 'coach')) {
+    throw new Error('Forbidden: staff access required')
+  }
+  return profile
+}
+
 /** Throws if there is no authenticated user */
 export async function requireAuth(): Promise<Profile> {
   const profile = await getProfile()

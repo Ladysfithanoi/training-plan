@@ -1,5 +1,38 @@
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
+
+/**
+ * Verify the caller may mutate this training block (giáo án).
+ * Admins may edit anything; coaches only blocks they created.
+ */
+async function guardOwnership(id: string) {
+  let profile
+  try {
+    profile = await requireStaff()
+  } catch {
+    return { error: Response.json({ error: 'Forbidden' }, { status: 403 }) }
+  }
+
+  if (profile.role === 'admin') return { profile }
+
+  const supabase = await createClient()
+  const { data: row } = await supabase
+    .from('training_blocks')
+    .select('created_by')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (!row) return { error: Response.json({ error: 'Not found' }, { status: 404 }) }
+  if (row.created_by !== profile.id) {
+    return {
+      error: Response.json(
+        { error: 'Bạn chỉ có thể sửa/xoá giáo án do chính mình tạo.' },
+        { status: 403 },
+      ),
+    }
+  }
+  return { profile }
+}
 
 /** GET /api/programs/[id] */
 export async function GET(
@@ -30,13 +63,10 @@ export async function PATCH(
   request: Request,
   ctx: RouteContext<'/api/programs/[id]'>,
 ) {
-  try {
-    await requireAdmin()
-  } catch {
-    return Response.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
   const { id } = await ctx.params
+  const guard = await guardOwnership(id)
+  if (guard.error) return guard.error
+
   const body = await request.json()
   const supabase = await createClient()
 
@@ -57,13 +87,10 @@ export async function DELETE(
   _req: Request,
   ctx: RouteContext<'/api/programs/[id]'>,
 ) {
-  try {
-    await requireAdmin()
-  } catch {
-    return Response.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
   const { id } = await ctx.params
+  const guard = await guardOwnership(id)
+  if (guard.error) return guard.error
+
   const supabase = await createClient()
 
   const { error } = await supabase.from('training_blocks').delete().eq('id', id)

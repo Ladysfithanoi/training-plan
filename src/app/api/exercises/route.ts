@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 
 /** GET /api/exercises — list all exercises */
 export async function GET(request: Request) {
@@ -31,10 +31,11 @@ export async function GET(request: Request) {
   return Response.json({ exercises: data })
 }
 
-/** POST /api/exercises — create an exercise (admin only) */
+/** POST /api/exercises — create an exercise (admin or coach) */
 export async function POST(request: Request) {
+  let profile
   try {
-    await requireAdmin()
+    profile = await requireStaff()
   } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
       optimal_rep_max: body.optimal_rep_max ?? 20,
       description: body.description ?? null,
       muscle_groups: body.muscle_groups ?? [],
+      created_by: profile.id,
     })
     .select('*, movement_pattern:movement_patterns(*)')
     .single()

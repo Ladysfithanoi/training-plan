@@ -5,7 +5,7 @@
 // guarantees they are evaluated in the Node.js API-route runtime.
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 
 // ── Shared admin-client factory (module-scoped helper, server-only) ──────────
 // Defined here rather than imported from lib so the env-var reads stay inside
@@ -21,9 +21,10 @@ function buildAdminClient() {
 
 /** POST /api/admin/users — create a new athlete account via the Admin Auth API */
 export async function POST(request: Request) {
-  // ── Caller must be an admin ────────────────────────────────────────────────
+  // ── Caller must be staff (admin or coach) ──────────────────────────────────
+  let caller
   try {
-    await requireAdmin()
+    caller = await requireStaff()
   } catch {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -60,6 +61,14 @@ export async function POST(request: Request) {
     )
   }
 
+  // ── Ownership / role rules ─────────────────────────────────────────────────
+  // Coaches may only create students (role 'user') and own everyone they create.
+  // Admins may create any role and the new account is left unowned (NULL).
+  const isCoach = caller.role === 'coach'
+  if (isCoach) role = 'user'
+  if (!['user', 'coach', 'admin'].includes(role)) role = 'user'
+  const createdBy: string | null = isCoach ? caller.id : null
+
   // ── Step 1: Create auth user (bypasses signup restrictions) ───────────────
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -83,14 +92,15 @@ export async function POST(request: Request) {
     .from('profiles')
     .upsert(
       {
-        id:        userId,
+        id:         userId,
         email,
-        full_name: full_name ?? null,
+        full_name:  full_name ?? null,
         role,
+        created_by: createdBy,
       },
       { onConflict: 'id', ignoreDuplicates: false },
     )
-    .select('id, email, full_name, role, created_at')
+    .select('id, email, full_name, role, created_by, created_at')
     .single()
 
   if (profileError || !profile) {
@@ -107,10 +117,11 @@ export async function POST(request: Request) {
   return NextResponse.json({ profile }, { status: 201 })
 }
 
-/** GET /api/admin/users — list all profiles */
+/** GET /api/admin/users — list profiles (admins: all; coaches: their students) */
 export async function GET() {
+  let caller
   try {
-    await requireAdmin()
+    caller = await requireStaff()
   } catch {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -123,10 +134,15 @@ export async function GET() {
     )
   }
 
-  const { data: profiles, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('profiles')
     .select('*')
     .order('created_at', { ascending: false })
+
+  // Coaches only see students they created.
+  if (caller.role === 'coach') query = query.eq('created_by', caller.id)
+
+  const { data: profiles, error } = await query
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

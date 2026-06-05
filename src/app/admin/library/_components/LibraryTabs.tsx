@@ -9,17 +9,23 @@ import type { MovementPattern, Exercise } from '@/types'
 interface LibraryTabsProps {
   initialPatterns: MovementPattern[]
   initialExercises: Exercise[]
+  currentUserId: string
+  isAdmin: boolean
 }
 
-const TABS = [
-  { id: 'exercises', label: 'Bài tập' },
-  { id: 'patterns', label: 'Chuỗi Chuyển Động' },
-]
-
-export function LibraryTabs({ initialPatterns, initialExercises }: LibraryTabsProps) {
+export function LibraryTabs({ initialPatterns, initialExercises, currentUserId, isAdmin }: LibraryTabsProps) {
   const [activeTab, setActiveTab] = useState('exercises')
   const [patterns, setPatterns] = useState(initialPatterns)
   const [exercises, setExercises] = useState(initialExercises)
+
+  // Movement patterns are a shared taxonomy managed by admins only — coaches
+  // pick from existing patterns, so the tab is hidden for them.
+  const TABS = isAdmin
+    ? [
+        { id: 'exercises', label: 'Bài tập' },
+        { id: 'patterns', label: 'Chuỗi Chuyển Động' },
+      ]
+    : [{ id: 'exercises', label: 'Bài tập' }]
 
   return (
     <div className="space-y-5">
@@ -47,6 +53,8 @@ export function LibraryTabs({ initialPatterns, initialExercises }: LibraryTabsPr
           exercises={exercises}
           patterns={patterns}
           onExercisesChange={setExercises}
+          currentUserId={currentUserId}
+          isAdmin={isAdmin}
         />
       )}
       {activeTab === 'patterns' && (

@@ -1,11 +1,11 @@
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { computeE1RM, checkDoubleProgression } from '@/lib/progression'
 import type { DoubleProgressionHint } from '@/types'
 
 // ── Ownership guard ────────────────────────────────────────────────────────────
 async function guardSession(sessionId: string) {
-  const profile = await requireAdmin()
+  const profile = await requireStaff()
   const supabase = await createClient()
   const { data: session } = await supabase
     .from('workout_sessions')

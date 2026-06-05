@@ -26,7 +26,7 @@ export default async function CoachMyTrainingPage({
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin') redirect('/dashboard')
+  if (profile?.role !== 'admin' && profile?.role !== 'coach') redirect('/dashboard')
 
   // ── Active user_program for this coach ────────────────────────────────────
   const { data: rawProgram } = await supabase

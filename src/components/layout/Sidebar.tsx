@@ -89,6 +89,13 @@ interface SidebarProps {
 export function Sidebar({ profile, onLogout }: SidebarProps) {
   const pathname = usePathname()
   const isAdmin  = profile.role === 'admin'
+  // Staff = admin or coach (HLV); both get the management section.
+  const isStaff  = profile.role === 'admin' || profile.role === 'coach'
+  const staffSectionLabel = isAdmin ? 'Quản trị viên / HLV' : 'Huấn luyện viên'
+  const roleLabel =
+    profile.role === 'admin' ? 'Quản trị viên'
+    : profile.role === 'coach' ? 'Huấn luyện viên'
+    : 'Học viên'
 
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
@@ -110,9 +117,9 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
       {/* ── Navigation ───────────────────────────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto py-3 px-1.5 md:px-2.5 space-y-0.5">
 
-        {/* Main nav — skip adminOnly items for non-admin users */}
+        {/* Main nav — skip adminOnly items for non-staff users */}
         {navItems
-          .filter(item => !item.adminOnly || isAdmin)
+          .filter(item => !item.adminOnly || isStaff)
           .map(item => (
             <Link
               key={item.href}
@@ -130,12 +137,12 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
             </Link>
           ))}
 
-        {/* Admin section */}
-        {isAdmin && (
+        {/* Staff section (admin or coach) */}
+        {isStaff && (
           <>
             <div className="pt-4 pb-1 px-2.5 hidden md:block">
               <p className="text-[10px] font-bold uppercase tracking-widest text-amber">
-                Quản trị viên / HLV
+                {staffSectionLabel}
               </p>
             </div>
             <div className="md:hidden pt-3 pb-1 flex justify-center">
@@ -173,7 +180,7 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
               {profile.full_name ?? profile.email}
             </p>
             <p className="text-[11px] text-ink/40 capitalize">
-              {profile.role === 'admin' ? 'Quản trị viên' : 'Học viên'}
+              {roleLabel}
             </p>
           </div>
         </div>

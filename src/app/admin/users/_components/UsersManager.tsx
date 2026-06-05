@@ -14,11 +14,15 @@ import type { Profile, TrainingBlock } from '@/types'
 interface UsersManagerProps {
   users: Profile[]
   blocks: TrainingBlock[]
+  /** Admins may create coaches/admins and edit roles; coaches manage only students. */
+  isAdmin: boolean
 }
+
+type ManagedRole = 'user' | 'coach' | 'admin'
 
 const PAGE_SIZE = 5
 
-export function UsersManager({ users: initialUsers, blocks }: UsersManagerProps) {
+export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersManagerProps) {
   const router = useRouter()
   const [users, setUsers] = useState(initialUsers)
   const [page, setPage] = useState(1)
@@ -30,13 +34,13 @@ export function UsersManager({ users: initialUsers, blocks }: UsersManagerProps)
   const [newEmail, setNewEmail] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newName, setNewName] = useState('')
-  const [newRole, setNewRole] = useState<'user' | 'admin'>('user')
+  const [newRole, setNewRole] = useState<ManagedRole>('user')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
   // Chỉnh sửa
   const [editName, setEditName] = useState('')
-  const [editRole, setEditRole] = useState<'user' | 'admin'>('user')
+  const [editRole, setEditRole] = useState<ManagedRole>('user')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -207,8 +211,16 @@ export function UsersManager({ users: initialUsers, blocks }: UsersManagerProps)
 
   const ROLE_LABELS: Record<string, string> = {
     admin: 'Quản trị viên',
+    coach: 'HLV',
     user: 'Học viên',
   }
+
+  // Role options shown in the create/edit selects (admin only).
+  const ROLE_OPTIONS = [
+    { value: 'user', label: 'Học viên' },
+    { value: 'coach', label: 'Huấn luyện viên (HLV)' },
+    { value: 'admin', label: 'Quản trị viên' },
+  ]
 
   return (
     <>
@@ -277,7 +289,9 @@ export function UsersManager({ users: initialUsers, blocks }: UsersManagerProps)
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
                         user.role === 'admin'
                           ? 'bg-ink/10 text-ink'
-                          : 'bg-herb/10 text-herb'
+                          : user.role === 'coach'
+                            ? 'bg-amber/10 text-amber'
+                            : 'bg-herb/10 text-herb'
                       }`}>
                         {ROLE_LABELS[user.role] ?? user.role}
                       </span>
@@ -413,15 +427,14 @@ export function UsersManager({ users: initialUsers, blocks }: UsersManagerProps)
             placeholder="Tối thiểu 8 ký tự"
             required
           />
-          <Select
-            label="Vai trò"
-            value={newRole}
-            onChange={e => setNewRole(e.target.value as 'user' | 'admin')}
-            options={[
-              { value: 'user', label: 'Học viên' },
-              { value: 'admin', label: 'Quản trị viên / HLV' },
-            ]}
-          />
+          {isAdmin && (
+            <Select
+              label="Vai trò"
+              value={newRole}
+              onChange={e => setNewRole(e.target.value as ManagedRole)}
+              options={ROLE_OPTIONS}
+            />
+          )}
           {createError && (
             <p className="text-sm text-danger">{createError}</p>
           )}
@@ -455,15 +468,14 @@ export function UsersManager({ users: initialUsers, blocks }: UsersManagerProps)
             onChange={e => setEditName(e.target.value)}
             placeholder="Nguyễn Văn A"
           />
-          <Select
-            label="Vai trò"
-            value={editRole}
-            onChange={e => setEditRole(e.target.value as 'user' | 'admin')}
-            options={[
-              { value: 'user', label: 'Học viên' },
-              { value: 'admin', label: 'Quản trị viên / HLV' },
-            ]}
-          />
+          {isAdmin && (
+            <Select
+              label="Vai trò"
+              value={editRole}
+              onChange={e => setEditRole(e.target.value as ManagedRole)}
+              options={ROLE_OPTIONS}
+            />
+          )}
           {editError && <p className="text-sm text-danger">{editError}</p>}
           <div className="flex gap-2 pt-2">
             <Button

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 
 /** True when an error is PostgREST/Postgres reporting a missing column (e.g. week_type). */
 function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -21,7 +21,7 @@ function isMissingColumnError(err: { code?: string; message?: string } | null): 
  * Returns: { phase: Phase }
  */
 export async function POST(request: Request) {
-  try { await requireAdmin() } catch {
+  try { await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 

@@ -18,7 +18,8 @@ export default async function AdminProgramsPage() {
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin') redirect('/dashboard')
+  if (profile?.role !== 'admin' && profile?.role !== 'coach') redirect('/dashboard')
+  const isAdmin = profile?.role === 'admin'
 
   const [{ data: blocks }, { data: exercises }, { data: patterns }] = await Promise.all([
     supabase
@@ -53,6 +54,8 @@ export default async function AdminProgramsPage() {
         blocks={typedBlocks}
         exercises={(exercises ?? []) as Exercise[]}
         patterns={(patterns ?? []) as MovementPattern[]}
+        currentUserId={user.id}
+        isAdmin={isAdmin}
       />
     </div>
   )

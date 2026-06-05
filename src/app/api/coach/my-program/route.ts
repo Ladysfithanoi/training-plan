@@ -1,4 +1,4 @@
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 
 /**
@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/server'
  */
 export async function GET() {
   let profile
-  try { profile = await requireAdmin() } catch {
+  try { profile = await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -35,7 +35,7 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   let profile
-  try { profile = await requireAdmin() } catch {
+  try { profile = await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 

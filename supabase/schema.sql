@@ -14,11 +14,13 @@ CREATE TABLE IF NOT EXISTS profiles (
   email       TEXT NOT NULL,
   full_name   TEXT,
   role        TEXT NOT NULL DEFAULT 'user'
-                CHECK (role IN ('admin', 'user')),
+                CHECK (role IN ('admin', 'coach', 'user')),
   -- Coach-generated shareable token — populated by POST /api/magic-link.
   -- Enables the /p/[token] guest route without requiring student login.
   -- migration 003_add_magic_token.sql
   magic_token TEXT,
+  -- Which coach created this student (migration 007). NULL = owned by admin.
+  created_by  UUID REFERENCES profiles (id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -72,6 +74,8 @@ CREATE TABLE IF NOT EXISTS exercises (
   optimal_rep_max     INT  NOT NULL DEFAULT 20,
   description         TEXT,
   muscle_groups       TEXT[] NOT NULL DEFAULT '{}',
+  -- Which staff member authored this exercise (migration 007). NULL = admin.
+  created_by          UUID REFERENCES profiles (id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -218,10 +222,19 @@ RETURNS boolean LANGUAGE sql SECURITY DEFINER STABLE AS $$
   );
 $$;
 
+-- Helper: is the current user staff (admin or coach)?  (migration 007)
+CREATE OR REPLACE FUNCTION public.is_staff()
+RETURNS boolean LANGUAGE sql SECURITY DEFINER STABLE AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'coach')
+  );
+$$;
+
 -- ── profiles ────────────────────────────────────────────────────────────────
+-- Coaches may additionally read students they created (created_by = self).
 CREATE POLICY "Users can read own profile"
   ON profiles FOR SELECT
-  USING (id = auth.uid() OR public.is_admin());
+  USING (id = auth.uid() OR public.is_admin() OR created_by = auth.uid());
 
 CREATE POLICY "Users can update own profile"
   ON profiles FOR UPDATE
@@ -242,48 +255,115 @@ CREATE POLICY "Authenticated users can read movement patterns"
 CREATE POLICY "Admins manage movement patterns"
   ON movement_patterns FOR ALL USING (public.is_admin());
 
+-- exercises: shared read; write by admin or the row's creator (migration 007).
 CREATE POLICY "Authenticated users can read exercises"
   ON exercises FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Admins manage exercises"
-  ON exercises FOR ALL USING (public.is_admin());
+CREATE POLICY "Staff insert exercises"
+  ON exercises FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR (public.is_staff() AND created_by = auth.uid()));
 
--- ── training_blocks & phases  (read for all, write for admins) ──────────────
+CREATE POLICY "Owner or admin update exercises"
+  ON exercises FOR UPDATE TO authenticated
+  USING (public.is_admin() OR created_by = auth.uid())
+  WITH CHECK (public.is_admin() OR created_by = auth.uid());
+
+CREATE POLICY "Owner or admin delete exercises"
+  ON exercises FOR DELETE TO authenticated
+  USING (public.is_admin() OR created_by = auth.uid());
+
+-- ── training_blocks & phases  (shared read, owner/admin write) ──────────────
 CREATE POLICY "Authenticated users can read blocks"
   ON training_blocks FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Admins manage blocks"
-  ON training_blocks FOR ALL USING (public.is_admin());
+CREATE POLICY "Staff insert blocks"
+  ON training_blocks FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin() OR (public.is_staff() AND created_by = auth.uid()));
+
+CREATE POLICY "Owner or admin update blocks"
+  ON training_blocks FOR UPDATE TO authenticated
+  USING (public.is_admin() OR created_by = auth.uid())
+  WITH CHECK (public.is_admin() OR created_by = auth.uid());
+
+CREATE POLICY "Owner or admin delete blocks"
+  ON training_blocks FOR DELETE TO authenticated
+  USING (public.is_admin() OR created_by = auth.uid());
 
 CREATE POLICY "Authenticated users can read phases"
   ON phases FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Admins manage phases"
-  ON phases FOR ALL USING (public.is_admin());
+CREATE POLICY "Staff manage phases of owned blocks"
+  ON phases FOR ALL TO authenticated
+  USING (
+    public.is_admin()
+    OR block_id IN (SELECT id FROM training_blocks WHERE created_by = auth.uid())
+  )
+  WITH CHECK (
+    public.is_admin()
+    OR block_id IN (SELECT id FROM training_blocks WHERE created_by = auth.uid())
+  );
 
 CREATE POLICY "Authenticated users can read phase exercises"
   ON phase_exercises FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Admins manage phase exercises"
-  ON phase_exercises FOR ALL USING (public.is_admin());
+CREATE POLICY "Staff manage phase exercises of owned blocks"
+  ON phase_exercises FOR ALL TO authenticated
+  USING (
+    public.is_admin()
+    OR phase_id IN (
+      SELECT p.id FROM phases p
+      JOIN training_blocks b ON b.id = p.block_id
+      WHERE b.created_by = auth.uid()
+    )
+  )
+  WITH CHECK (
+    public.is_admin()
+    OR phase_id IN (
+      SELECT p.id FROM phases p
+      JOIN training_blocks b ON b.id = p.block_id
+      WHERE b.created_by = auth.uid()
+    )
+  );
 
 -- ── user_programs ────────────────────────────────────────────────────────────
+-- Coaches may read / manage assignments for students they created (migration 007).
 CREATE POLICY "Users read own programs"
   ON user_programs FOR SELECT
-  USING (user_id = auth.uid() OR public.is_admin());
+  USING (
+    user_id = auth.uid()
+    OR public.is_admin()
+    OR user_id IN (SELECT id FROM profiles WHERE created_by = auth.uid())
+  );
 
-CREATE POLICY "Admins manage user programs"
-  ON user_programs FOR ALL USING (public.is_admin());
+CREATE POLICY "Staff manage user programs"
+  ON user_programs FOR ALL
+  USING (
+    public.is_admin()
+    OR user_id IN (SELECT id FROM profiles WHERE created_by = auth.uid())
+  )
+  WITH CHECK (
+    public.is_admin()
+    OR user_id IN (SELECT id FROM profiles WHERE created_by = auth.uid())
+  );
 
 -- Allow users to update their own phase progress (advance phase)
 CREATE POLICY "Users can update own program phase"
   ON user_programs FOR UPDATE
   USING (user_id = auth.uid());
 
--- ── workout_sessions & sets  (users own their data) ─────────────────────────
+-- ── workout_sessions & sets  (owner, admin, or owning coach) ────────────────
 CREATE POLICY "Users manage own sessions"
   ON workout_sessions FOR ALL
-  USING (user_id = auth.uid() OR public.is_admin());
+  USING (
+    user_id = auth.uid()
+    OR public.is_admin()
+    OR user_id IN (SELECT id FROM profiles WHERE created_by = auth.uid())
+  )
+  WITH CHECK (
+    user_id = auth.uid()
+    OR public.is_admin()
+    OR user_id IN (SELECT id FROM profiles WHERE created_by = auth.uid())
+  );
 
 CREATE POLICY "Users manage own sets"
   ON workout_sets FOR ALL
@@ -292,6 +372,22 @@ CREATE POLICY "Users manage own sets"
       SELECT id FROM workout_sessions WHERE user_id = auth.uid()
     )
     OR public.is_admin()
+    OR session_id IN (
+      SELECT s.id FROM workout_sessions s
+      JOIN profiles p ON p.id = s.user_id
+      WHERE p.created_by = auth.uid()
+    )
+  )
+  WITH CHECK (
+    session_id IN (
+      SELECT id FROM workout_sessions WHERE user_id = auth.uid()
+    )
+    OR public.is_admin()
+    OR session_id IN (
+      SELECT s.id FROM workout_sessions s
+      JOIN profiles p ON p.id = s.user_id
+      WHERE p.created_by = auth.uid()
+    )
   );
 
 -- =============================================================================

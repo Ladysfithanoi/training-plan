@@ -1,10 +1,11 @@
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 
 /** POST /api/user-programs — assign a training block to a user */
 export async function POST(request: Request) {
+  let profile
   try {
-    await requireAdmin()
+    profile = await requireStaff()
   } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -15,8 +16,24 @@ export async function POST(request: Request) {
     return Response.json({ error: 'user_id and block_id are required' }, { status: 400 })
   }
 
-  // Use session-based client — "Admins manage user programs" RLS policy allows this
+  // Use session-based client — RLS "Staff manage user programs" policy applies.
   const supabase = await createClient()
+
+  // Coaches may only assign to students they created. (RLS also enforces this;
+  // the explicit check gives a clearer error than a WITH-CHECK violation.)
+  if (profile.role !== 'admin') {
+    const { data: student } = await supabase
+      .from('profiles')
+      .select('created_by')
+      .eq('id', user_id)
+      .maybeSingle()
+    if (!student || student.created_by !== profile.id) {
+      return Response.json(
+        { error: 'Bạn chỉ có thể giao giáo án cho học viên của mình.' },
+        { status: 403 },
+      )
+    }
+  }
 
   // Pause any existing active program for this user
   await supabase

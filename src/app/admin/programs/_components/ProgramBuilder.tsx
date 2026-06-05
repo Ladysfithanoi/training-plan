@@ -86,6 +86,8 @@ interface ProgramBuilderProps {
   selectedBlockId: string
   /** Notify the workspace that the user changed active block. */
   onBlockSelect: (id: string) => void
+  currentUserId: string
+  isAdmin: boolean
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -96,9 +98,14 @@ export function ProgramBuilder({
   patterns,
   selectedBlockId,
   onBlockSelect,
+  currentUserId,
+  isAdmin,
 }: ProgramBuilderProps) {
   const router = useRouter()
   const [blocks, setBlocks] = useState(initialBlocks)
+
+  /** Coaches may edit/delete only blocks they created; admins edit anything. */
+  const canEdit = (b: TrainingBlock) => isAdmin || b.created_by === currentUserId
 
   // ── Sort + pagination state ────────────────────────────────────────────────
   const [sortKey,     setSortKey]     = useState<SortKey>('date_desc')
@@ -395,17 +402,24 @@ export function ProgramBuilder({
                       {blockTotalWeeks(selectedBlock)} tuần
                     </span>
                   )}
+                  {!canEdit(selectedBlock) && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 bg-ink/5 text-ink/40">
+                      Dùng chung
+                    </span>
+                  )}
                 </div>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => handleDelete(selectedBlock.id)}
-                className="text-danger hover:bg-danger/8 shrink-0"
-              >
-                Xoá khối tập
-              </Button>
+              {canEdit(selectedBlock) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleDelete(selectedBlock.id)}
+                  className="text-danger hover:bg-danger/8 shrink-0"
+                >
+                  Xoá khối tập
+                </Button>
+              )}
             </div>
 
             {/* Phase timeline */}

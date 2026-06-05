@@ -5,7 +5,7 @@
 // evaluation on every request.
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 import { generateMagicToken } from '@/lib/guestToken'
 
 /**
@@ -17,9 +17,10 @@ import { generateMagicToken } from '@/lib/guestToken'
  * Only admins may call this endpoint.
  */
 export async function POST(request: Request) {
-  // ── Admin auth check ───────────────────────────────────────────────────────
+  // ── Staff auth check ───────────────────────────────────────────────────────
+  let caller
   try {
-    await requireAdmin()
+    caller = await requireStaff()
   } catch {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
   // ── Step 1: Look up the athlete's profile row ──────────────────────────────
   let { data: profile, error: profileFetchError } = await supabaseAdmin
     .from('profiles')
-    .select('id, full_name, email, magic_token')
+    .select('id, full_name, email, magic_token, created_by')
     .eq('id', user_id)
     .maybeSingle()
 
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
         },
         { onConflict: 'id' },
       )
-      .select('id, full_name, email, magic_token')
+      .select('id, full_name, email, magic_token, created_by')
       .single()
 
     if (insertError || !inserted) {
@@ -118,6 +119,16 @@ export async function POST(request: Request) {
 
   if (!profile) {
     return NextResponse.json({ error: 'Học viên không tồn tại.' }, { status: 404 })
+  }
+
+  // ── Coach ownership guard ──────────────────────────────────────────────────
+  // This route uses the service-role client (bypasses RLS); coaches may only
+  // generate links for students they created.
+  if (caller.role !== 'admin' && profile.created_by !== caller.id) {
+    return NextResponse.json(
+      { error: 'Bạn chỉ có thể tạo liên kết cho học viên của mình.' },
+      { status: 403 },
+    )
   }
 
   // ── Step 3: Generate token if missing or force-refresh requested ───────────

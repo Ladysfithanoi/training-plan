@@ -12,6 +12,8 @@ interface Props {
   exercises: Exercise[]
   patterns: MovementPattern[]
   onExercisesChange: (exercises: Exercise[]) => void
+  currentUserId: string
+  isAdmin: boolean
 }
 
 const PAGE_SIZE = 10
@@ -48,7 +50,9 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
-export function ExercisesTab({ exercises: initialExercises, patterns, onExercisesChange }: Props) {
+export function ExercisesTab({ exercises: initialExercises, patterns, onExercisesChange, currentUserId, isAdmin }: Props) {
+  /** Coaches may edit/delete only exercises they created; admins edit anything. */
+  const canEdit = (ex: Exercise) => isAdmin || ex.created_by === currentUserId
   const [exercises, setExercises] = useState(initialExercises)
   const [page, setPage] = useState(1)
   const [query, setQuery] = useState('')
@@ -256,17 +260,25 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
                     {ex.optimal_rep_min}–{ex.optimal_rep_max}
                   </td>
                   <td className="px-5 py-3">
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button size="sm" variant="secondary" onClick={() => openEdit(ex)}>Sửa</Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-danger hover:bg-danger/8"
-                        onClick={() => setDeleteTarget(ex)}
-                      >
-                        Xoá
-                      </Button>
-                    </div>
+                    {canEdit(ex) ? (
+                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button size="sm" variant="secondary" onClick={() => openEdit(ex)}>Sửa</Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-danger hover:bg-danger/8"
+                          onClick={() => setDeleteTarget(ex)}
+                        >
+                          Xoá
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end">
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-ink/30 rounded-full bg-ink/5 px-2 py-0.5">
+                          Dùng chung
+                        </span>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

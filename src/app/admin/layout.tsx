@@ -25,7 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         .select('*')
         .eq('id', user.id)
         .single()
-      if (!data || data.role !== 'admin') {
+      if (!data || (data.role !== 'admin' && data.role !== 'coach')) {
         router.push('/dashboard')
         return
       }

@@ -1,4 +1,4 @@
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import {
   encodeNotesWithMeta, extractSuggestionFromNotes, extractSurveyFromNotes,
@@ -43,7 +43,7 @@ function normaliseSession<T extends Partial<WorkoutSession>>(session: T): T {
 
 // ── Ownership guard ────────────────────────────────────────────────────────────
 async function guardSession(sessionId: string) {
-  const profile = await requireAdmin()
+  const profile = await requireStaff()
   const supabase = await createClient()
   const { data: session } = await supabase
     .from('workout_sessions')

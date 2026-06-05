@@ -25,13 +25,19 @@ interface ProgramsWorkspaceProps {
   blocks:    BlockWithPhases[]
   exercises: Exercise[]
   patterns:  MovementPattern[]
+  currentUserId: string
+  isAdmin: boolean
 }
 
-export function ProgramsWorkspace({ blocks, exercises, patterns }: ProgramsWorkspaceProps) {
+export function ProgramsWorkspace({ blocks, exercises, patterns, currentUserId, isAdmin }: ProgramsWorkspaceProps) {
   // Prefer first block that has at least one phase; otherwise fall back to first block.
   const [selectedBlockId, setSelectedBlockId] = useState<string>(
     (blocks.find(b => (b.phases ?? []).length > 0) ?? blocks[0])?.id ?? '',
   )
+
+  // Coaches may only edit blocks they created; admins may edit anything.
+  const selectedBlock = blocks.find(b => b.id === selectedBlockId) ?? null
+  const canEditSelected = isAdmin || (selectedBlock?.created_by === currentUserId)
 
   return (
     <div className="space-y-10">
@@ -48,6 +54,8 @@ export function ProgramsWorkspace({ blocks, exercises, patterns }: ProgramsWorks
           patterns={patterns}
           selectedBlockId={selectedBlockId}
           onBlockSelect={setSelectedBlockId}
+          currentUserId={currentUserId}
+          isAdmin={isAdmin}
         />
       </section>
 
@@ -58,16 +66,29 @@ export function ProgramsWorkspace({ blocks, exercises, patterns }: ProgramsWorks
             <span className="h-6 w-6 rounded-full bg-ink text-paper text-xs font-bold flex items-center justify-center">2</span>
             Cấu hình Bài Tập theo Giai Đoạn
           </h2>
-          <p className="text-sm text-ink/50 mb-5">
-            Giai đoạn bên dưới tự động khớp với khối đang chọn ở trên.
-            Gán bài tập cho từng meso, chỉnh sửa trực tiếp — tự lưu.
-          </p>
-          <PhaseExerciseBuilder
-            blocks={blocks}
-            exercises={exercises}
-            patterns={patterns}
-            selectedBlockId={selectedBlockId}
-          />
+          {canEditSelected ? (
+            <>
+              <p className="text-sm text-ink/50 mb-5">
+                Giai đoạn bên dưới tự động khớp với khối đang chọn ở trên.
+                Gán bài tập cho từng meso, chỉnh sửa trực tiếp — tự lưu.
+              </p>
+              <PhaseExerciseBuilder
+                blocks={blocks}
+                exercises={exercises}
+                patterns={patterns}
+                selectedBlockId={selectedBlockId}
+              />
+            </>
+          ) : (
+            <div className="rounded-xl border border-amber/20 bg-amber/5 px-5 py-4">
+              <p className="text-sm font-semibold text-amber/90">Giáo án dùng chung</p>
+              <p className="text-sm text-ink/55 mt-1">
+                Đây là giáo án do người khác tạo — bạn chỉ có thể xem, không thể chỉnh sửa
+                cấu hình bài tập. Bạn vẫn có thể <strong>giao</strong> giáo án này cho học viên
+                của mình ở trang <strong>Danh sách Học viên</strong>.
+              </p>
+            </div>
+          )}
         </section>
       )}
 

@@ -23,8 +23,9 @@
  *      Conflict target: (workout_day_id, phase_exercise_id).
  *
  * Uses the service-role admin client so it bypasses RLS on the new tables
- * (which may not have policies yet). The caller must still be authenticated
- * as an admin — requireAdmin() is checked before any DB writes happen.
+ * (which may not have policies yet). The caller must still be staff
+ * (requireStaff), and — because RLS is bypassed — coach→own-block ownership is
+ * verified explicitly before any DB writes happen.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Request body schema:
@@ -44,7 +45,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireAdmin }      from '@/lib/auth'
+import { requireStaff }      from '@/lib/auth'
 
 // ── Local types for the request payload ──────────────────────────────────────
 
@@ -74,7 +75,8 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   // ── Auth guard ────────────────────────────────────────────────────────────
-  try { await requireAdmin() } catch {
+  let profile
+  try { profile = await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -125,6 +127,23 @@ export async function POST(
   }
 
   const programId = phase.block_id   // → training_blocks.id
+
+  // ── Ownership guard ───────────────────────────────────────────────────────
+  // This route uses the service-role client (bypasses RLS), so coach→own-block
+  // ownership must be checked explicitly. Admins may edit any block.
+  if (profile.role !== 'admin') {
+    const { data: block } = await db
+      .from('training_blocks')
+      .select('created_by')
+      .eq('id', programId)
+      .maybeSingle()
+    if (!block || block.created_by !== profile.id) {
+      return Response.json(
+        { error: 'Bạn chỉ có thể chỉnh sửa giáo án do chính mình tạo.' },
+        { status: 403 },
+      )
+    }
+  }
 
   // ── Step 2: Persist split config back onto the phase (JSONB sync) ─────────
   // Use the sanitised safeSplitDays (plain objects, guaranteed array) so the

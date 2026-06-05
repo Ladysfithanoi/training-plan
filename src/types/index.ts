@@ -1,5 +1,6 @@
 // ─── Domain enums ────────────────────────────────────────────────────────────
-export type UserRole = 'admin' | 'user'
+//   admin — super user; coach (HLV) — staff with a private roster; user — student.
+export type UserRole = 'admin' | 'coach' | 'user'
 
 // ─── Post-workout autoregulation survey ──────────────────────────────────────
 /** Did the athlete beat, meet, or miss their rep target? */
@@ -46,6 +47,8 @@ export interface Profile {
   created_at: string
   /** Coach-generated shareable token — null until first generated (migration 003) */
   magic_token?: string | null
+  /** Which coach created this student — null = owned by admin (migration 007) */
+  created_by?: string | null
 }
 
 // ─── Movement Patterns ───────────────────────────────────────────────────────
@@ -67,6 +70,8 @@ export interface Exercise {
   optimal_rep_max: number
   description: string | null
   muscle_groups: string[]
+  /** Which staff member authored this exercise — null = admin (migration 007) */
+  created_by?: string | null
   created_at: string
 }
 

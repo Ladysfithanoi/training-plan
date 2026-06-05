@@ -65,7 +65,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Admin-only guard
+  // Staff-only guard (admin or coach/HLV)
   if (user && path.startsWith('/admin')) {
     const { data: profile } = await supabase
       .from('profiles')
@@ -73,7 +73,7 @@ export async function proxy(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (profile?.role !== 'admin') {
+    if (profile?.role !== 'admin' && profile?.role !== 'coach') {
       const url = request.nextUrl.clone()
       url.pathname = '/dashboard'
       return NextResponse.redirect(url)

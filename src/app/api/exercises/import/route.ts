@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 
 /**
  * POST /api/exercises/import
@@ -7,7 +7,8 @@ import { requireAdmin } from '@/lib/auth'
  * [{ name, movement_pattern_id?, type?, optimal_rep_min?, optimal_rep_max?, description?, muscle_groups? }]
  */
 export async function POST(request: Request) {
-  try { await requireAdmin() } catch {
+  let profile
+  try { profile = await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
       optimal_rep_max: Number(row.optimal_rep_max) || 20,
       description: row.description ? String(row.description).trim() : null,
       muscle_groups,
+      created_by: profile.id,
     }
   })
 

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireAdmin } from '@/lib/auth'
+import { requireStaff } from '@/lib/auth'
 
 /** True when an error is PostgREST/Postgres reporting a missing column (e.g. week_type). */
 function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -26,7 +26,7 @@ export async function GET(_req: Request, ctx: RouteContext<'/api/phases/[id]'>) 
 
 /** PATCH /api/phases/[id] — update a phase (admin only) */
 export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id]'>) {
-  try { await requireAdmin() } catch {
+  try { await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -84,7 +84,7 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
 
 /** DELETE /api/phases/[id] — delete a phase (admin only) */
 export async function DELETE(_req: Request, ctx: RouteContext<'/api/phases/[id]'>) {
-  try { await requireAdmin() } catch {
+  try { await requireStaff() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
