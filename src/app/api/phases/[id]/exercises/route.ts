@@ -1,15 +1,18 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireStaff } from '@/lib/auth'
 
-// Columns added by migration 006 — may not exist on the live DB yet.
-const MIGRATION_006_COLUMNS = ['is_amrap', 'target_percentage_1rm'] as const
+// Columns added by later migrations — may not exist on the live DB yet.
+// 006: is_amrap, target_percentage_1rm   ·   008: sort_order
+const OPTIONAL_COLUMNS = ['is_amrap', 'target_percentage_1rm', 'sort_order'] as const
 
 /** True when an error is PostgREST/Postgres reporting a missing column. */
 function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
   if (!err) return false
   if (err.code === 'PGRST204' || err.code === '42703') return true
-  return MIGRATION_006_COLUMNS.some(c => err.message?.includes(c))
+  return OPTIONAL_COLUMNS.some(c => err.message?.includes(c))
 }
+
+const PE_SELECT = '*, exercise:exercises(*, movement_pattern:movement_patterns(*))'
 
 /** GET /api/phases/[id]/exercises — list exercises assigned to a phase */
 export async function GET(_req: Request, ctx: RouteContext<'/api/phases/[id]/exercises'>) {
@@ -18,12 +21,24 @@ export async function GET(_req: Request, ctx: RouteContext<'/api/phases/[id]/exe
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data, error } = await supabase
+  // Attempt 1: order by the explicit drag-to-reorder position (migration 008).
+  let { data, error } = await supabase
     .from('phase_exercises')
-    .select('*, exercise:exercises(*, movement_pattern:movement_patterns(*))')
+    .select(PE_SELECT)
     .eq('phase_id', id)
+    .order('sort_order', { nullsFirst: false })
     .order('order_label', { nullsFirst: true })
     .order('created_at')
+
+  // Attempt 2: sort_order column not deployed yet → fall back to the old order.
+  if (error && isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from('phase_exercises')
+      .select(PE_SELECT)
+      .eq('phase_id', id)
+      .order('order_label', { nullsFirst: true })
+      .order('created_at'))
+  }
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
   return Response.json({ exercises: data })
@@ -43,7 +58,6 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
   }
 
   const supabase = await createClient()
-  const sel = '*, exercise:exercises(*, movement_pattern:movement_patterns(*))'
 
   // Always-present columns (base schema + migration 005)
   const base = {
@@ -59,18 +73,32 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
     order_label:   body.order_label   ?? null,
     loading_style: body.loading_style ?? 'horizontal',
   }
-  // Migration 006 columns (may not be deployed)
-  const meta006 = {
-    is_amrap:              body.is_amrap              ?? false,
-    target_percentage_1rm: body.target_percentage_1rm ?? null,
+
+  // Best-effort: append the new exercise to the end of its (phase, day) by
+  // computing the next sort_order. Tolerates the column not existing yet.
+  let nextSortOrder: number | undefined
+  {
+    let q = supabase.from('phase_exercises').select('sort_order').eq('phase_id', id)
+    q = base.day_id ? q.eq('day_id', base.day_id) : q.is('day_id', null)
+    const { data: rows, error } = await q
+    if (!error && rows) {
+      nextSortOrder = rows.reduce((m, r) => Math.max(m, (r.sort_order as number | null) ?? 0), 0) + 1
+    }
   }
 
-  // Attempt 1: insert with migration-006 columns.
-  let result = await supabase.from('phase_exercises').insert({ ...base, ...meta006 }).select(sel).single()
+  // Optional columns (migration 006 + 008) — may not be deployed.
+  const optional = {
+    is_amrap:              body.is_amrap              ?? false,
+    target_percentage_1rm: body.target_percentage_1rm ?? null,
+    ...(nextSortOrder !== undefined ? { sort_order: nextSortOrder } : {}),
+  }
+
+  // Attempt 1: insert with optional columns.
+  let result = await supabase.from('phase_exercises').insert({ ...base, ...optional }).select(PE_SELECT).single()
 
   // Attempt 2: those columns don't exist yet → insert base only.
   if (result.error && isMissingColumnError(result.error)) {
-    result = await supabase.from('phase_exercises').insert(base).select(sel).single()
+    result = await supabase.from('phase_exercises').insert(base).select(PE_SELECT).single()
   }
 
   if (result.error) return Response.json({ error: result.error.message }, { status: 400 })
@@ -98,13 +126,15 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
   const supabase = await createClient()
   // Return the joined exercise so the client can refresh the row after an
   // exercise swap (new name / type / movement pattern come back in one trip).
-  const sel = '*, exercise:exercises(*, movement_pattern:movement_patterns(*))'
+  const sel = PE_SELECT
 
   // Numeric fields — cast before storing
   const numericFields = [
     'target_sets', 'target_rep_min', 'target_rep_max', 'rir_target',
     // migration 006
     'target_percentage_1rm',
+    // migration 008
+    'sort_order',
   ]
   // String fields — store as-is (null clears the value)
   const stringFields = ['notes', 'day_id', 'order_label', 'loading_style']
@@ -138,10 +168,10 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
     .select(sel)
     .single()
 
-  // Attempt 2: migration-006 columns missing → drop them and retry.
+  // Attempt 2: optional (migration 006/008) columns missing → drop them and retry.
   if (result.error && isMissingColumnError(result.error)) {
     const stripped = { ...patch }
-    for (const c of MIGRATION_006_COLUMNS) delete stripped[c]
+    for (const c of OPTIONAL_COLUMNS) delete stripped[c]
 
     if (Object.keys(stripped).length > 0) {
       result = await supabase

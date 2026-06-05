@@ -133,6 +133,9 @@ export interface PhaseExercise {
   notes: string | null
   day_of_week: number[] | null
 
+  /** Drag-to-reorder position within a (phase, day); independent of order_label (migration 008) */
+  sort_order?: number | null
+
   // ── Day assignment (migration 005) ───────────────────────────────────────────
   /**
    * UUID string matching a SplitDay.id stored in phases.split_days JSONB.

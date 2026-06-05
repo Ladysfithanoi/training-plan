@@ -1075,6 +1075,45 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     )
   }
 
+  // ── Reorder exercises within the current day (up / down) ─────────────────────
+  // Swaps a row with its neighbour in the visible list, then renumbers the whole
+  // day's sort_order so the new order survives a reload. order_label (STT) is
+  // untouched, so superset tags are preserved.
+  async function moveExercise(phaseExerciseId: string, dir: -1 | 1) {
+    const visible = visibleExercises
+    const idx     = visible.findIndex(v => v.id === phaseExerciseId)
+    const swapIdx = idx + dir
+    if (idx < 0 || swapIdx < 0 || swapIdx >= visible.length) return
+
+    const newVisible = [...visible]
+    ;[newVisible[idx], newVisible[swapIdx]] = [newVisible[swapIdx], newVisible[idx]]
+
+    // Rebuild local state: emit the day's rows in their new order (with fresh
+    // sort_order) at the array slots they previously occupied; leave other
+    // days' rows untouched.
+    const dayIds = new Set(newVisible.map(v => v.id))
+    setPhaseExercises(prev => {
+      let k = 0
+      return prev.map(row => {
+        if (dayIds.has(row.id)) {
+          const next = newVisible[k]
+          k++
+          return { ...next, sort_order: k }
+        }
+        return row
+      })
+    })
+
+    // Persist the new positions for the affected day.
+    await Promise.all(newVisible.map((v, i) =>
+      fetch(`/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${v.id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ sort_order: i + 1 }),
+      }),
+    ))
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -1679,7 +1718,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink/5">
-                  {visibleExercises.map(pe => (
+                  {visibleExercises.map((pe, idx) => (
                     <tr key={pe.id} className="group hover:bg-ink/2">
 
                       {/* ── STT column ── */}
@@ -1772,6 +1811,30 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                       {/* ── Edit / Delete actions ── */}
                       <td className="px-4 py-2.5">
                         <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {/* Di chuyển lên */}
+                          <button
+                            type="button"
+                            onClick={() => void moveExercise(pe.id, -1)}
+                            disabled={idx === 0}
+                            title="Di chuyển lên"
+                            className="h-7 w-7 rounded flex items-center justify-center text-ink/40 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                            </svg>
+                          </button>
+                          {/* Di chuyển xuống */}
+                          <button
+                            type="button"
+                            onClick={() => void moveExercise(pe.id, 1)}
+                            disabled={idx === visibleExercises.length - 1}
+                            title="Di chuyển xuống"
+                            className="h-7 w-7 rounded flex items-center justify-center text-ink/40 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
                           {/* Sửa — bút chì */}
                           <button
                             type="button"

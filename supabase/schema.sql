@@ -138,6 +138,9 @@ CREATE TABLE IF NOT EXISTS phase_exercises (
   rir_target      INT  NOT NULL DEFAULT 2,   -- Reps In Reserve target
   notes           TEXT,
   day_of_week     INT[],                     -- e.g. [1,3,5] = Mon/Wed/Fri
+  -- Explicit drag-to-reorder position within a (phase, day) (migration 008).
+  -- Independent of order_label so superset tags (A1/A2) are preserved.
+  sort_order      INT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
