@@ -790,6 +790,20 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     void persistSplitConfig(splitType, updated)
   }
 
+  // ── Reorder training days (← / →) ────────────────────────────────────────────
+  // Swaps a day with its neighbour in the split and persists the new order.
+  function moveDay(dayId: string, dir: -1 | 1) {
+    if (!splitType) return
+    const idx     = splitDays.findIndex(d => d.id === dayId)
+    const swapIdx = idx + dir
+    if (idx < 0 || swapIdx < 0 || swapIdx >= splitDays.length) return
+
+    const updated = [...splitDays]
+    ;[updated[idx], updated[swapIdx]] = [updated[swapIdx], updated[idx]]
+    setSplitDays(updated)
+    void persistSplitConfig(splitType, updated)
+  }
+
   // ── Exercise CRUD ─────────────────────────────────────────────────────────────
   async function handleAdd() {
     if (!selectedExercise || !selectedPhaseId) return
@@ -1076,40 +1090,45 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   }
 
   // ── Reorder exercises within the current day (up / down) ─────────────────────
-  // Swaps a row with its neighbour in the visible list, then renumbers the whole
-  // day's sort_order so the new order survives a reload. order_label (STT) is
-  // untouched, so superset tags are preserved.
+  // Swaps a row with its neighbour, then renumbers the day's sort_order so the
+  // new order survives a reload. The STT badges (order_label) stay POSITIONAL —
+  // i.e. position 1 keeps "A1", position 2 keeps "A2" — so swapping A1·Squat and
+  // A2·Row gives A1·Row + A2·Squat (the labels don't travel with the exercise).
   async function moveExercise(phaseExerciseId: string, dir: -1 | 1) {
     const visible = visibleExercises
     const idx     = visible.findIndex(v => v.id === phaseExerciseId)
     const swapIdx = idx + dir
     if (idx < 0 || swapIdx < 0 || swapIdx >= visible.length) return
 
+    // Snapshot the labels in their current positional order — these stay fixed.
+    const labels = visible.map(v => v.order_label ?? null)
+
     const newVisible = [...visible]
     ;[newVisible[idx], newVisible[swapIdx]] = [newVisible[swapIdx], newVisible[idx]]
 
-    // Rebuild local state: emit the day's rows in their new order (with fresh
-    // sort_order) at the array slots they previously occupied; leave other
-    // days' rows untouched.
+    // Rebuild local state: emit the day's rows in their new order at the array
+    // slots they previously occupied, assigning each its position's sort_order
+    // AND positional order_label. Other days' rows are left untouched.
     const dayIds = new Set(newVisible.map(v => v.id))
     setPhaseExercises(prev => {
       let k = 0
       return prev.map(row => {
         if (dayIds.has(row.id)) {
           const next = newVisible[k]
+          const result = { ...next, sort_order: k + 1, order_label: labels[k] ?? null }
           k++
-          return { ...next, sort_order: k }
+          return result
         }
         return row
       })
     })
 
-    // Persist the new positions for the affected day.
+    // Persist new position + positional STT for the affected day.
     await Promise.all(newVisible.map((v, i) =>
       fetch(`/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${v.id}`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ sort_order: i + 1 }),
+        body:    JSON.stringify({ sort_order: i + 1, order_label: labels[i] ?? null }),
       }),
     ))
   }
@@ -1392,7 +1411,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                       Các ngày:
                     </span>
 
-                    {splitDays.map(day => (
+                    {splitDays.map((day, dayIdx) => (
                       <div key={day.id} className="flex items-center gap-0.5 group">
                         {renamingDayId === day.id ? (
                           /* ── Inline rename ── */
@@ -1449,6 +1468,30 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                         {/* Per-tab actions — visible on hover */}
                         {renamingDayId !== day.id && (
                           <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {splitDays.length > 1 && (
+                              <>
+                                <button
+                                  onClick={() => moveDay(day.id, -1)}
+                                  disabled={dayIdx === 0}
+                                  title="Chuyển sang trái"
+                                  className="h-6 w-6 rounded flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                  </svg>
+                                </button>
+                                <button
+                                  onClick={() => moveDay(day.id, 1)}
+                                  disabled={dayIdx === splitDays.length - 1}
+                                  title="Chuyển sang phải"
+                                  className="h-6 w-6 rounded flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </button>
+                              </>
+                            )}
                             <button
                               onClick={() => startRenameDay(day)}
                               title="Đổi tên ngày"
