@@ -77,6 +77,39 @@ function computeHorizontalLabel(existingCount: number): string {
 }
 
 /**
+ * Build a day-id remap so assigned exercises FOLLOW a split-config change
+ * instead of being orphaned when day UUIDs are regenerated.
+ *
+ * Matching priority:
+ *   1. Same day type  (push→push, lower→lower, …) — preserves intent across
+ *      reshuffles even when the day order changes.
+ *   2. Positional index for whatever is left — handles type changes and
+ *      different day counts gracefully.
+ *
+ * Old days with no counterpart (e.g. shrinking from 3→2 days) are simply left
+ * out of the map; their exercises become orphans and surface in the recovery
+ * panel rather than vanishing.
+ */
+function buildDayRemap(fromDays: SplitDay[], toDays: SplitDay[]): Map<string, string> {
+  const map    = new Map<string, string>()
+  const usedTo = new Set<string>()
+
+  // Pass 1 — match by day type.
+  for (const fd of fromDays) {
+    const match = toDays.find(td => td.type === fd.type && !usedTo.has(td.id))
+    if (match) { map.set(fd.id, match.id); usedTo.add(match.id) }
+  }
+  // Pass 2 — match the remainder by position.
+  const leftoverFrom = fromDays.filter(fd => !map.has(fd.id))
+  const leftoverTo   = toDays.filter(td => !usedTo.has(td.id))
+  leftoverFrom.forEach((fd, i) => {
+    const td = leftoverTo[i]
+    if (td) { map.set(fd.id, td.id); usedTo.add(td.id) }
+  })
+  return map
+}
+
+/**
  * Maps a weekly set count to bar/text Tailwind classes and a range label.
  *
  * Thresholds follow Eric Helms / Renaissance Periodization volume landmarks:
@@ -790,18 +823,27 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
   // ── Split type selection (LOCAL PREVIEW — never auto-persists) ─────────────────
   function handleSetSplitType(type: SplitType) {
-    // Re-selecting the currently-saved type restores its EXACT saved days so any
-    // assigned exercises reattach — previewing other types never destroys data.
-    if (type === savedConfig.type && savedConfig.days.length > 0) {
-      setSplitType(type)
-      setSplitDays(savedConfig.days)
-      setActiveDayId(savedConfig.days[0]?.id ?? null)
-      return
-    }
-    const days = generateDefaultDays(type)
+    // Target day set: re-selecting the saved type restores its EXACT saved days
+    // (so previewing other types never destroys data); otherwise generate fresh
+    // defaults for the chosen type.
+    const targetDays =
+      (type === savedConfig.type && savedConfig.days.length > 0)
+        ? savedConfig.days
+        : generateDefaultDays(type)
+
+    // Remap assigned exercises from the CURRENT day set onto the target days so
+    // they follow the structure change instead of all dropping into the orphan
+    // list. (Local only — persisted when the coach saves the config.)
+    const remap = buildDayRemap(splitDays, targetDays)
+    setPhaseExercises(prev => prev.map(pe => {
+      if (!pe.day_id) return pe
+      const newId = remap.get(pe.day_id)
+      return newId ? { ...pe, day_id: newId } : pe
+    }))
+
     setSplitType(type)
-    setSplitDays(days)
-    setActiveDayId(days[0]?.id ?? null)
+    setSplitDays(targetDays)
+    setActiveDayId(targetDays[0]?.id ?? null)
   }
 
   // ── Day CRUD ──────────────────────────────────────────────────────────────────

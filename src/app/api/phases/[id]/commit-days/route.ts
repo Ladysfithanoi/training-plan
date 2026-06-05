@@ -250,6 +250,36 @@ export async function POST(
     committedExerciseCount = exerciseRows.length
   }
 
+  // ── Step 7: Persist phase_exercises.day_id (source of truth on reload) ─────
+  //
+  // The builder reloads exercise→day assignment from phase_exercises.day_id, NOT
+  // from day_exercises. Previously this column was never written here, so after a
+  // split-type change (which regenerates day UUIDs) every exercise reloaded with
+  // a day_id pointing at a now-deleted day → re-orphaned. Write the client's
+  // current assignment back so the remap survives a reload.
+  //
+  // Only persist values that are either null (intentionally unassigned) or point
+  // at a day that still exists in the saved config — never write a dangling UUID.
+  const dayIdUpdates = phase_exercises.filter(
+    pe => pe.day_id == null || activeDayKeySet.has(pe.day_id),
+  )
+
+  if (dayIdUpdates.length > 0) {
+    const results = await Promise.all(dayIdUpdates.map(pe =>
+      db.from('phase_exercises')
+        .update({ day_id: pe.day_id })
+        .eq('id', pe.id)
+        .eq('phase_id', phaseId),
+    ))
+    const failed = results.find(r => r.error)
+    if (failed?.error) {
+      return Response.json(
+        { error: `phase_exercises.day_id update failed: ${failed.error.message}` },
+        { status: 500 },
+      )
+    }
+  }
+
   // ── Success ───────────────────────────────────────────────────────────────
   return Response.json({
     ok:            true,
