@@ -77,39 +77,6 @@ function computeHorizontalLabel(existingCount: number): string {
 }
 
 /**
- * Build a day-id remap so assigned exercises FOLLOW a split-config change
- * instead of being orphaned when day UUIDs are regenerated.
- *
- * Matching priority:
- *   1. Same day type  (push→push, lower→lower, …) — preserves intent across
- *      reshuffles even when the day order changes.
- *   2. Positional index for whatever is left — handles type changes and
- *      different day counts gracefully.
- *
- * Old days with no counterpart (e.g. shrinking from 3→2 days) are simply left
- * out of the map; their exercises become orphans and surface in the recovery
- * panel rather than vanishing.
- */
-function buildDayRemap(fromDays: SplitDay[], toDays: SplitDay[]): Map<string, string> {
-  const map    = new Map<string, string>()
-  const usedTo = new Set<string>()
-
-  // Pass 1 — match by day type.
-  for (const fd of fromDays) {
-    const match = toDays.find(td => td.type === fd.type && !usedTo.has(td.id))
-    if (match) { map.set(fd.id, match.id); usedTo.add(match.id) }
-  }
-  // Pass 2 — match the remainder by position.
-  const leftoverFrom = fromDays.filter(fd => !map.has(fd.id))
-  const leftoverTo   = toDays.filter(td => !usedTo.has(td.id))
-  leftoverFrom.forEach((fd, i) => {
-    const td = leftoverTo[i]
-    if (td) { map.set(fd.id, td.id); usedTo.add(td.id) }
-  })
-  return map
-}
-
-/**
  * Maps a weekly set count to bar/text Tailwind classes and a range label.
  *
  * Thresholds follow Eric Helms / Renaissance Periodization volume landmarks:
@@ -480,11 +447,31 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const configDirty = splitType !== null &&
     splitSig(splitType, splitDays) !== splitSig(savedConfig.type, savedConfig.days)
 
-  // Exercises whose day_id no longer matches any current day (e.g. orphaned by a
-  // previous split-type change). Surfaced in a recovery panel so they're not lost.
+  // Exercises that genuinely have no home.
+  //   • day_id null                         → never assigned
+  //   • day_id points at a deleted day      → real orphan, needs recovery
+  // BUT: while PREVIEWING a different/unsaved split type, exercises pinned to the
+  // SAVED config's days are NOT orphans — they belong to that saved layout and
+  // reappear when its type is reselected. They're hidden from this preview rather
+  // than dumped into the recovery panel (assignments stay pinned to their day).
   const orphanExercises: PhaseExerciseRow[] = splitType
-    ? phaseExercises.filter(pe => !pe.day_id || !splitDays.some(d => d.id === pe.day_id))
+    ? phaseExercises.filter(pe => {
+        if (!pe.day_id) return true
+        if (splitDays.some(d => d.id === pe.day_id)) return false
+        if (savedConfig.days.some(d => d.id === pe.day_id)) return false
+        return true
+      })
     : []
+
+  // Exercises pinned to the saved config but hidden because the coach is currently
+  // previewing a DIFFERENT split layout. Counted only to show a reassuring hint.
+  const hiddenSavedExerciseCount = (splitType && configDirty)
+    ? phaseExercises.filter(pe =>
+        pe.day_id != null &&
+        !splitDays.some(d => d.id === pe.day_id) &&
+        savedConfig.days.some(d => d.id === pe.day_id),
+      ).length
+    : 0
 
   /**
    * The exercise rows shown in the table.
@@ -822,24 +809,18 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   }
 
   // ── Split type selection (LOCAL PREVIEW — never auto-persists) ─────────────────
+  // Exercises are PINNED to their day_id and never moved automatically. Switching
+  // the split type just swaps which days are shown:
+  //   • re-selecting the saved type restores its EXACT saved days, so its pinned
+  //     exercises reappear on their original days;
+  //   • previewing another type shows that layout's own days (empty until the
+  //     coach assigns exercises there) — the saved config's exercises stay put
+  //     and are simply hidden until its type is reselected.
   function handleSetSplitType(type: SplitType) {
-    // Target day set: re-selecting the saved type restores its EXACT saved days
-    // (so previewing other types never destroys data); otherwise generate fresh
-    // defaults for the chosen type.
     const targetDays =
       (type === savedConfig.type && savedConfig.days.length > 0)
         ? savedConfig.days
         : generateDefaultDays(type)
-
-    // Remap assigned exercises from the CURRENT day set onto the target days so
-    // they follow the structure change instead of all dropping into the orphan
-    // list. (Local only — persisted when the coach saves the config.)
-    const remap = buildDayRemap(splitDays, targetDays)
-    setPhaseExercises(prev => prev.map(pe => {
-      if (!pe.day_id) return pe
-      const newId = remap.get(pe.day_id)
-      return newId ? { ...pe, day_id: newId } : pe
-    }))
 
     setSplitType(type)
     setSplitDays(targetDays)
@@ -2041,6 +2022,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               {addOpen ? '✕ Đóng' : '+ Thêm bài tập'}
             </Button>
           </div>
+
+          {/* Preview hint — assignments are pinned, so saved-config exercises are
+              hidden (not lost) while another layout is being previewed. */}
+          {hiddenSavedExerciseCount > 0 && (
+            <div className="rounded-xl border border-ink/10 bg-ink/3 px-4 py-2.5 text-xs text-ink/60">
+              👁 Đang xem thử cấu hình khác. {hiddenSavedExerciseCount} bài tập của cấu hình đã lưu
+              {savedConfig.type ? ` (${getSplitConfig(savedConfig.type).label})` : ''} vẫn được giữ nguyên — chọn lại kiểu đã lưu để xem, hoặc bấm “Lưu cấu hình giáo án” để chuyển hẳn sang cấu hình này.
+            </div>
+          )}
 
           {/* Copy-from-another-day — clone a similar session's exercises into the
               active day in one click. Only days that actually have exercises are
