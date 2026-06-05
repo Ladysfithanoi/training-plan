@@ -1330,7 +1330,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
               {/* Edit / Delete controls — visible on hover */}
               {renamingPhaseId !== phase.id && (
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-0.5">
+                <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity ml-0.5">
                   {/* Rename */}
                   <button
                     type="button"
@@ -1606,7 +1606,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
                         {/* Per-tab actions — visible on hover */}
                         {renamingDayId !== day.id && (
-                          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                             {splitDays.length > 1 && (
                               <>
                                 <button
@@ -1992,7 +1992,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
                       {/* ── Edit / Delete actions ── */}
                       <td className="px-4 py-2.5">
-                        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                           {/* Di chuyển lên */}
                           <button
                             type="button"

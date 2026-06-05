@@ -231,37 +231,37 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
         ) : (
           <table className="w-full text-sm min-w-[580px]">
             <thead className="border-b border-ink/8">
-              <tr className="text-xs text-ink/40 uppercase tracking-wide">
-                <th className="text-left px-5 py-3 w-10">#</th>
-                <th className="text-left px-5 py-3">Tên bài tập</th>
-                <th className="text-left px-5 py-3">Loại bài</th>
-                <th className="text-left px-5 py-3">Chuỗi chuyển động</th>
-                <th className="text-left px-5 py-3">Khoảng Reps</th>
-                <th className="px-5 py-3" />
+              <tr className="text-xs text-ink/40 uppercase tracking-wide whitespace-nowrap">
+                <th className="text-left px-3 sm:px-5 py-3 w-10">#</th>
+                <th className="text-left px-3 sm:px-5 py-3 min-w-[160px]">Tên bài tập</th>
+                <th className="text-left px-3 sm:px-5 py-3">Loại bài</th>
+                <th className="text-left px-3 sm:px-5 py-3">Chuỗi chuyển động</th>
+                <th className="text-left px-3 sm:px-5 py-3">Khoảng Reps</th>
+                <th className="px-3 sm:px-5 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-ink/5">
               {pageItems.map((ex, i) => (
-                <tr key={ex.id} className="group hover:bg-ink/2 transition-colors">
-                  <td className="px-5 py-3 text-ink/30 text-xs">{globalOffset + i + 1}</td>
-                  <td className="px-5 py-3">
+                <tr key={ex.id} className="group hover:bg-ink/2 transition-colors align-top">
+                  <td className="px-3 sm:px-5 py-3 text-ink/30 text-xs whitespace-nowrap">{globalOffset + i + 1}</td>
+                  <td className="px-3 sm:px-5 py-3 min-w-[160px]">
                     <p className="font-medium text-ink">{ex.name}</p>
                     {ex.muscle_groups.length > 0 && (
                       <p className="text-xs text-ink/40">{ex.muscle_groups.join(', ')}</p>
                     )}
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-3 sm:px-5 py-3 whitespace-nowrap">
                     <TypeBadge type={ex.type} />
                   </td>
-                  <td className="px-5 py-3 text-ink/50">
+                  <td className="px-3 sm:px-5 py-3 text-ink/50 whitespace-nowrap">
                     {(ex.movement_pattern as any)?.name ?? '—'}
                   </td>
-                  <td className="px-5 py-3 text-ink/60">
+                  <td className="px-3 sm:px-5 py-3 text-ink/60 whitespace-nowrap">
                     {ex.optimal_rep_min}–{ex.optimal_rep_max}
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-3 sm:px-5 py-3 whitespace-nowrap">
                     {canEdit(ex) ? (
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <Button size="sm" variant="secondary" onClick={() => openEdit(ex)}>Sửa</Button>
                         <Button
                           size="sm"

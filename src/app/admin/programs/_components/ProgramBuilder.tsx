@@ -452,14 +452,14 @@ export function ProgramBuilder({
                 )}
 
                 {/* Periodization summary — tabular row-by-row layout */}
-                <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
-                  <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+                <div className="bg-white rounded-2xl border border-slate-100 p-4 md:p-6 shadow-sm">
+                  <h3 className="text-lg md:text-xl font-bold text-slate-800 mb-4 md:mb-6 flex items-center gap-2">
                     Cấu trúc Phân kỳ
                     <HelpTip text={GLOSSARY.meso.def} />
                   </h3>
 
-                  {/* Column headers */}
-                  <div className="grid grid-cols-12 gap-4 items-center pb-2 mb-1 border-b border-slate-100 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  {/* Column headers — hidden on mobile (rows stack with inline labels) */}
+                  <div className="hidden md:grid grid-cols-12 gap-4 items-center pb-2 mb-1 border-b border-slate-100 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                     <span className="col-span-2">Trạng thái</span>
                     <span className="col-span-3">Giai đoạn</span>
                     <span className="col-span-2">Thời lượng</span>
@@ -494,9 +494,9 @@ export function ProgramBuilder({
                         : null
 
                       return (
-                        <div key={phase.id} className="grid grid-cols-12 gap-4 items-center py-4 border-b border-slate-50 last:border-none">
+                        <div key={phase.id} className="flex flex-col gap-1.5 md:grid md:grid-cols-12 md:gap-4 md:items-center py-3.5 md:py-4 border-b border-slate-100 md:border-slate-50 last:border-none">
                           {/* A — status badge */}
-                          <div className="col-span-2">
+                          <div className="md:col-span-2">
                             <span className={cn(
                               'inline-flex items-center justify-center px-3 py-1 text-xs font-semibold rounded-full uppercase tracking-wide',
                               badgePastel,
@@ -506,7 +506,7 @@ export function ProgramBuilder({
                           </div>
 
                           {/* B — title + optional split sub-tag */}
-                          <div className="col-span-3 min-w-0">
+                          <div className="md:col-span-3 min-w-0">
                             <p className="font-bold text-slate-700 text-sm leading-tight">{phase.name}</p>
                             {splitLabel && (
                               <span className="bg-amber-50 text-amber-700 text-[11px] font-medium px-2 py-0.5 rounded-md mt-1 inline-block">
@@ -516,18 +516,27 @@ export function ProgramBuilder({
                           </div>
 
                           {/* C — duration */}
-                          <div className="col-span-2">
-                            <p className="text-sm font-medium text-slate-600">{phase.duration_weeks} tuần</p>
+                          <div className="md:col-span-2">
+                            <p className="text-sm font-medium text-slate-600">
+                              <span className="md:hidden text-slate-400 font-normal">Thời lượng: </span>
+                              {phase.duration_weeks} tuần
+                            </p>
                           </div>
 
                           {/* D — frequency */}
-                          <div className="col-span-2">
-                            <p className="text-sm font-medium text-slate-600">{frequency}</p>
+                          <div className="md:col-span-2">
+                            <p className="text-sm font-medium text-slate-600">
+                              <span className="md:hidden text-slate-400 font-normal">Tần suất: </span>
+                              {frequency}
+                            </p>
                           </div>
 
                           {/* E — rep ranges & custom rules */}
-                          <div className="col-span-3">
-                            <p className="text-sm text-slate-500 leading-relaxed break-words">{detail}</p>
+                          <div className="md:col-span-3">
+                            <p className="text-sm text-slate-500 leading-relaxed break-words">
+                              <span className="md:hidden text-slate-400">Chi tiết: </span>
+                              {detail}
+                            </p>
                           </div>
                         </div>
                       )
