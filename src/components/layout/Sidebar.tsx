@@ -11,6 +11,8 @@ interface NavItem {
   label:     string
   icon:      React.ReactNode
   adminOnly?: boolean
+  /** Visually emphasise this item (amber + star) as the recommended starting point. */
+  highlight?: boolean
 }
 
 function Icon({ d }: { d: string }) {
@@ -27,6 +29,13 @@ function Icon({ d }: { d: string }) {
 // coaches get the full week/day/matrix view; the /workouts list is no longer
 // surfaced as a primary nav item.
 const navItems: NavItem[] = [
+  {
+    // Pinned to the top + highlighted with a star so every user knows to start here.
+    href:      '/huong-dan',
+    label:     'Hướng dẫn sử dụng',
+    highlight: true,
+    icon:      <Icon d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />,
+  },
   {
     href:  '/dashboard',
     label: 'Bảng điều khiển',
@@ -49,11 +58,6 @@ const navItems: NavItem[] = [
     href:  '/progress',
     label: 'Tiến độ tập luyện',
     icon:  <Icon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />,
-  },
-  {
-    href:  '/huong-dan',
-    label: 'Hướng dẫn sử dụng',
-    icon:  <Icon d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />,
   },
 ]
 
@@ -129,16 +133,32 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href}
-              title={item.label}
+              title={item.highlight ? `${item.label} — bắt đầu từ đây` : item.label}
               className={cn(
-                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150',
+                'relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150',
                 isActive(item.href)
                   ? 'bg-ink text-paper'
-                  : 'text-ink/50 hover:text-ink hover:bg-ink/6',
+                  : item.highlight
+                    ? 'bg-amber/10 text-amber font-semibold ring-1 ring-amber/40 hover:bg-amber/15'
+                    : 'text-ink/50 hover:text-ink hover:bg-ink/6',
               )}
             >
               {item.icon}
               <span className="hidden md:inline truncate">{item.label}</span>
+              {item.highlight && (
+                <span
+                  className={cn(
+                    'ml-auto hidden md:inline text-[10px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5',
+                    isActive(item.href) ? 'bg-paper/20 text-paper' : 'bg-amber/20 text-amber',
+                  )}
+                >
+                  Bắt đầu
+                </span>
+              )}
+              {/* Collapsed (mobile) — a small star dot marks the highlighted item */}
+              {item.highlight && (
+                <span className="md:hidden absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber ring-2 ring-white" />
+              )}
             </Link>
           ))}
 
