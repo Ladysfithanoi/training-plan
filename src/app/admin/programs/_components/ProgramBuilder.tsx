@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { Input } from '@/components/ui/Input'
 import { PhaseTimeline } from '@/components/programs/PhaseTimeline'
 import { RepRangeMatrix } from '@/components/programs/RepRangeMatrix'
@@ -119,6 +120,10 @@ export function ProgramBuilder({
   const [blockDesc,   setBlockDesc]   = useState('')
   const [preset,      setPreset]      = useState<keyof typeof PRESETS | 'custom'>('classic_3_meso')
 
+  // ── Delete confirmation (replaces window.confirm) ──────────────────────────
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const confirmDeleteBlock = blocks.find(b => b.id === confirmDeleteId) ?? null
+
   // Sync local blocks when server re-fetches (router.refresh after create).
   // Deliberate prop→state sync; the rule's perf concern doesn't apply here.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -198,8 +203,6 @@ export function ProgramBuilder({
   }
 
   async function handleDelete(blockId: string) {
-    if (!confirm('Xoá khối tập này và tất cả các giai đoạn bên trong? Hành động này không thể hoàn tác.')) return
-
     const res = await fetch(`/api/programs/${blockId}`, { method: 'DELETE' })
     if (res.ok) {
       const newBlocks     = blocks.filter(b => b.id !== blockId)
@@ -414,7 +417,7 @@ export function ProgramBuilder({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  onClick={() => handleDelete(selectedBlock.id)}
+                  onClick={() => setConfirmDeleteId(selectedBlock.id)}
                   className="text-danger hover:bg-danger/8 shrink-0"
                 >
                   Xoá khối tập
@@ -657,6 +660,24 @@ export function ProgramBuilder({
           </div>
         </div>
       </Modal>
+
+      {/* ── Confirm: xoá khối tập ──────────────────────────────────────────── */}
+      <ConfirmModal
+        open={confirmDeleteId !== null}
+        title="Xoá khối tập luyện"
+        description={
+          confirmDeleteBlock
+            ? `Xoá khối tập “${confirmDeleteBlock.name}” và tất cả các giai đoạn bên trong? Hành động này không thể hoàn tác.`
+            : 'Xoá khối tập này và tất cả các giai đoạn bên trong? Hành động này không thể hoàn tác.'
+        }
+        confirmLabel="Xoá khối tập"
+        onConfirm={() => {
+          const id = confirmDeleteId!
+          setConfirmDeleteId(null)
+          void handleDelete(id)
+        }}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   )
 }
