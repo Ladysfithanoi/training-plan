@@ -335,6 +335,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
   // Save states
   const [saveStatus, setSaveStatus]   = useState<SaveStatus>('idle') // explicit button
+  const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null) // server reason on failure
 
   // ── Add exercise form ────────────────────────────────────────────────────────
   const [addOpen, setAddOpen]             = useState(false)
@@ -803,8 +804,9 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       setTimeout(() => setSaveStatus('idle'), 2500)
     } catch (err) {
       console.error('[handleSaveConfig]', err)
+      setSaveErrorMsg(err instanceof Error && err.message !== 'save_failed' ? err.message : null)
       setSaveStatus('error')
-      setTimeout(() => setSaveStatus('idle'), 3500)
+      setTimeout(() => { setSaveStatus('idle'); setSaveErrorMsg(null) }, 6000)
     }
   }
 
@@ -1700,6 +1702,14 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 </select>
               </div>
             </div>
+
+            {/* Server-side reason when a save fails — surfaced so issues aren't
+                hidden behind a generic "Lưu thất bại". */}
+            {saveStatus === 'error' && saveErrorMsg && (
+              <div className="mx-5 mb-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+                Lỗi: {saveErrorMsg}
+              </div>
+            )}
 
             {/* Split description + day tabs */}
             {splitType && (
