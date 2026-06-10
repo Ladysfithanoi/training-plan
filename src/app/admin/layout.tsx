@@ -52,7 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="flex h-dvh bg-paper overflow-hidden max-w-full">
       <Sidebar profile={profile} onLogout={handleLogout} />
       <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
-        <div className="max-w-6xl mx-auto px-4 md:px-8 py-6">{children}</div>
+        <div className="max-w-6xl mx-auto px-4 md:px-8 pt-16 pb-6 md:py-6">{children}</div>
       </main>
     </div>
   )

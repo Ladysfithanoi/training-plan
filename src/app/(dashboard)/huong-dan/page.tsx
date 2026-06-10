@@ -27,6 +27,15 @@ const COACH_SELF_STEPS: Step[] = [
   { title: 'Đổi khối tập khi cần', desc: 'Muốn theo giáo án khác? Bấm nút “Đổi” ở đầu trang “Lịch tập của tôi” để chọn lại khối tập.' },
 ]
 
+// Coach/Admin: building a program from scratch — block → meso → config → exercises.
+const COACH_BUILD_STEPS: Step[] = [
+  { title: 'Tạo khối tập mới', desc: 'Vào “Giáo án tập luyện”. Ở cột “Các Khối Tập”, bấm “+ Tạo mới”, đặt tên, mô tả (tuỳ chọn) rồi chọn một cấu trúc giai đoạn (preset 3 Meso, 3 Meso + Nghỉ tích cực, hoặc “Tuỳ chỉnh” để tạo khối trống). Bấm “Tạo khối tập”.' },
+  { title: 'Thêm Meso (giai đoạn)', desc: 'Chọn khối vừa tạo, bấm “+ Thêm Meso” (hoặc “+ Thêm giai đoạn đầu tiên” nếu khối còn trống). Trong cửa sổ “Thêm Giai Đoạn Mới”: đặt tên (VD: “Meso 1 — Nền tảng”), chọn loại giai đoạn (tập luyện / duy trì / nghỉ tích cực), số tuần, số buổi/tuần và các vùng reps. Lặp lại để thêm nhiều meso.' },
+  { title: 'Chỉnh cấu hình giáo án', desc: 'Với mỗi meso, ở mục cấu hình chọn “— Chọn kiểu split —” (kiểu chia buổi tập). Có thể đổi tên ngày, “+ Thêm ngày” hoặc sắp xếp lại thứ tự ngày. Sau khi chỉnh, BẮT BUỘC bấm “Lưu cấu hình giáo án” — dấu * báo còn thay đổi chưa lưu.' },
+  { title: 'Gán bài tập cho từng ngày', desc: 'Chọn ngày tập rồi bấm “+ Thêm bài tập” để tìm và gán bài từ kho, đặt số hiệp (sets) và vùng reps mục tiêu. Đảm bảo mỗi ngày đều có đủ bài trước khi giao cho học viên.' },
+  { title: 'Kiểm tra & giao', desc: 'Xem lại “Tiến trình giai đoạn”, “Ma trận vùng Reps” và “Cấu trúc Phân kỳ” để chắc chắn khối tập hợp lý, sau đó giao cho học viên ở “Danh sách Học viên” → “Giáo án”.' },
+]
+
 const STUDENT_STEPS: Step[] = [
   { title: 'Xem chương trình', desc: 'Mở “Chương trình của tôi” để xem khối tập, các giai đoạn và bài tập HLV đã giao.' },
   { title: 'Ghi buổi tập', desc: 'Trong mỗi buổi, nhập số reps và mức tạ cho từng hiệp. Cột “Mục tiêu” cho biết reps & RIR cần đạt.' },
@@ -117,6 +126,24 @@ export default async function GuidePage() {
           <Card>
             <CardBody>
               <StepList steps={COACH_SELF_STEPS} />
+            </CardBody>
+          </Card>
+        </section>
+      )}
+
+      {/* Coach/Admin: build a program (block → meso → config → exercises) */}
+      {isStaff && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
+            Xây dựng giáo án — khối tập, meso & cấu hình
+          </h2>
+          <p className="text-sm text-ink/55 -mt-2 mb-4 leading-relaxed">
+            Hướng dẫn tạo một giáo án hoàn chỉnh: thêm khối tập mới, thêm các giai đoạn (meso),
+            chỉnh cấu hình split của chương trình rồi gán bài tập cho từng ngày.
+          </p>
+          <Card>
+            <CardBody>
+              <StepList steps={COACH_BUILD_STEPS} />
             </CardBody>
           </Card>
         </section>

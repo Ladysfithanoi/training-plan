@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { Profile } from '@/types'
 import { Logo } from './Logo'
@@ -98,6 +99,21 @@ interface SidebarProps {
 
 export function Sidebar({ profile, onLogout }: SidebarProps) {
   const pathname = usePathname()
+  // Mobile drawer: hidden by default to give the page full width; the user opens
+  // it from the floating button and it closes on navigation / backdrop / Esc.
+  const [open, setOpen] = useState(false)
+
+  // Close the drawer whenever the route changes (a nav link was tapped).
+  useEffect(() => { setOpen(false) }, [pathname])
+
+  // Close on Escape while the drawer is open.
+  useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   const isAdmin  = profile.role === 'admin'
   // Staff = admin or coach (HLV); both get the management section.
   const isStaff  = profile.role === 'admin' || profile.role === 'coach'
@@ -114,18 +130,60 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
   }
 
   return (
-    <aside className="flex h-full flex-col w-12 md:w-58 shrink-0 border-r border-ink/8 bg-white transition-all duration-200">
+    <>
+      {/* ── Mobile open button (floating, hidden when drawer is open) ─────────── */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Mở menu"
+        className={cn(
+          'md:hidden fixed top-3 left-3 z-30 h-10 w-10 flex items-center justify-center rounded-xl border border-ink/10 bg-white/90 text-ink shadow-sm backdrop-blur transition-opacity',
+          open && 'pointer-events-none opacity-0',
+        )}
+      >
+        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
+      {/* ── Backdrop (mobile only, when drawer is open) ──────────────────────── */}
+      {open && (
+        <div
+          className="md:hidden fixed inset-0 z-40 bg-ink/40 backdrop-blur-[1px]"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
+    <aside
+      className={cn(
+        'flex h-full flex-col w-64 md:w-58 shrink-0 border-r border-ink/8 bg-white',
+        // Mobile: off-canvas drawer that slides in. Desktop: static in flow.
+        'fixed inset-y-0 left-0 z-50 transition-transform duration-200 md:static md:z-auto md:translate-x-0',
+        open ? 'translate-x-0 shadow-xl' : '-translate-x-full',
+      )}
+    >
 
       {/* ── Brand ────────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5 px-2.5 md:px-5 py-[18px] border-b border-ink/8 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-[18px] border-b border-ink/8 overflow-hidden">
         <Logo className="h-8 w-8" />
-        <span className="font-serif font-bold text-sm text-ink tracking-tight leading-tight hidden md:inline whitespace-nowrap">
+        <span className="font-serif font-bold text-sm text-ink tracking-tight leading-tight whitespace-nowrap">
           Kế hoạch Tập luyện
         </span>
+        {/* Close button — mobile only */}
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Đóng menu"
+          className="md:hidden ml-auto h-8 w-8 flex items-center justify-center rounded-lg text-ink/40 hover:text-ink hover:bg-ink/6 transition-colors"
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       {/* ── Navigation ───────────────────────────────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto py-3 px-1.5 md:px-2.5 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5">
 
         {/* Main nav — skip adminOnly items for non-staff users */}
         {navItems
@@ -145,24 +203,17 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
               )}
             >
               {item.icon}
-              <span className="hidden md:inline truncate">{item.label}</span>
-              {/* Collapsed (mobile) — a small star dot marks the highlighted item */}
-              {item.highlight && (
-                <span className="md:hidden absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber ring-2 ring-white" />
-              )}
+              <span className="truncate">{item.label}</span>
             </Link>
           ))}
 
         {/* Staff section (admin or coach) */}
         {isStaff && (
           <>
-            <div className="pt-4 pb-1 px-2.5 hidden md:block">
+            <div className="pt-4 pb-1 px-2.5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-amber">
                 {staffSectionLabel}
               </p>
-            </div>
-            <div className="md:hidden pt-3 pb-1 flex justify-center">
-              <div className="h-px w-5 bg-amber/50" />
             </div>
             {adminNavItems.map(item => (
               <Link
@@ -177,7 +228,7 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
                 )}
               >
                 {item.icon}
-                <span className="hidden md:inline truncate">{item.label}</span>
+                <span className="truncate">{item.label}</span>
               </Link>
             ))}
           </>
@@ -185,9 +236,8 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
       </nav>
 
       {/* ── User footer ──────────────────────────────────────────────────────── */}
-      <div className="border-t border-ink/8 p-2 md:p-3">
-        {/* Full footer — md+ */}
-        <div className="hidden md:flex items-center gap-2.5 mb-2.5">
+      <div className="border-t border-ink/8 p-3">
+        <div className="flex items-center gap-2.5 mb-2.5">
           <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink shrink-0">
             {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
           </div>
@@ -201,26 +251,20 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
           </div>
         </div>
 
-        {/* Compact avatar — mobile */}
-        <div className="md:hidden flex justify-center mb-2">
-          <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink">
-            {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
-          </div>
-        </div>
-
         <button
           onClick={onLogout}
           title="Đăng xuất"
-          className="w-full flex items-center justify-center md:justify-start gap-2 text-xs font-medium text-ink/45 hover:text-danger transition-colors rounded-lg px-2 py-1.5 hover:bg-danger/6"
+          className="w-full flex items-center justify-start gap-2 text-xs font-medium text-ink/45 hover:text-danger transition-colors rounded-lg px-2 py-1.5 hover:bg-danger/6"
         >
           <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
               d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
-          <span className="hidden md:inline">Đăng xuất</span>
+          <span>Đăng xuất</span>
         </button>
       </div>
 
     </aside>
+    </>
   )
 }
