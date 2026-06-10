@@ -48,7 +48,7 @@ export function Modal({ open, onClose, title, children, className, size = 'md' }
       {/* Panel */}
       <div
         className={cn(
-          'relative w-full rounded-2xl bg-paper shadow-2xl border border-ink/8',
+          'relative flex w-full max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-2xl bg-paper shadow-2xl border border-ink/8',
           'animate-in fade-in zoom-in-95 duration-200',
           sizeClasses[size],
           className,
@@ -56,7 +56,7 @@ export function Modal({ open, onClose, title, children, className, size = 'md' }
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between border-b border-ink/8 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-ink/8 px-6 py-4">
             <h2 id="modal-title" className="text-base font-semibold text-ink">
               {title}
             </h2>
@@ -72,7 +72,7 @@ export function Modal({ open, onClose, title, children, className, size = 'md' }
           </div>
         )}
 
-        <div className="p-6">{children}</div>
+        <div className="overflow-y-auto overscroll-contain p-6">{children}</div>
       </div>
     </div>
   )
