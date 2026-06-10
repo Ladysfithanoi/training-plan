@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS day_exercises (
 );
 
 -- Existing installs: add any missing columns (no-op if already present).
+-- The table was created manually and is missing several columns, so add them
+-- all as nullable here, then attach FKs + the unique constraint below.
+ALTER TABLE day_exercises
+  ADD COLUMN IF NOT EXISTS workout_day_id UUID;
+
 ALTER TABLE day_exercises
   ADD COLUMN IF NOT EXISTS phase_exercise_id UUID;
 
@@ -33,10 +38,17 @@ ALTER TABLE day_exercises
 ALTER TABLE day_exercises
   ADD COLUMN IF NOT EXISTS loading_style TEXT NOT NULL DEFAULT 'horizontal';
 
--- Ensure the FK on phase_exercise_id exists (added separately so it also covers
--- tables created before this column was tracked). Guarded so re-runs are safe.
+-- Ensure the FKs exist (added separately so they also cover tables created
+-- before these columns were tracked). Guarded so re-runs are safe.
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'day_exercises_workout_day_id_fkey'
+  ) THEN
+    ALTER TABLE day_exercises
+      ADD CONSTRAINT day_exercises_workout_day_id_fkey
+      FOREIGN KEY (workout_day_id) REFERENCES workout_days (id) ON DELETE CASCADE;
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'day_exercises_phase_exercise_id_fkey'
   ) THEN
