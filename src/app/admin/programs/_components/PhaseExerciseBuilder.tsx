@@ -317,11 +317,13 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [copySourceDayId, setCopySourceDayId] = useState<string | null>(null)
   const [copyingDay, setCopyingDay]           = useState(false)
 
-  // ── Copy a day from another Meso in the same block ─────────────────────────────
-  // Source meso's exercises are fetched on demand (only the active phase's rows
-  // live in phaseExercises). copyCrossDayId is a day_id within the chosen meso.
+  // ── Copy whole sessions from another Meso in the same block ────────────────────
+  // Replicates entire buổi tập (new days + their exercises) from a different meso
+  // into THIS meso, so a similar mesocycle doesn't have to be rebuilt by hand.
+  // The source meso's exercises are fetched on demand (only the active phase's
+  // rows live in phaseExercises). selectedCrossDayIds = source day_ids to copy.
   const [copySourcePhaseId, setCopySourcePhaseId]   = useState<string | null>(null)
-  const [copyCrossDayId, setCopyCrossDayId]         = useState<string | null>(null)
+  const [selectedCrossDayIds, setSelectedCrossDayIds] = useState<Set<string>>(new Set())
   const [crossPhaseExercises, setCrossPhaseExercises] = useState<PhaseExerciseRow[]>([])
   const [loadingCrossPhase, setLoadingCrossPhase]   = useState(false)
   const [copyingCross, setCopyingCross]             = useState(false)
@@ -666,7 +668,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setCopySourceDayId(null)
     // Reset cross-meso copy selections too.
     setCopySourcePhaseId(null)
-    setCopyCrossDayId(null)
+    setSelectedCrossDayIds(new Set())
     setCrossPhaseExercises([])
     // Migration 006: sync week_type from newly selected phase
     const newWeekType = (phase?.week_type ?? 'standard') as WeekType
@@ -728,6 +730,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // Only the active phase's rows live in phaseExercises, so another meso's
   // sessions must be loaded on demand when the coach picks it.
   useEffect(() => {
+    setSelectedCrossDayIds(new Set())
     if (!copySourcePhaseId) {
       setCrossPhaseExercises([])
       return
@@ -1412,8 +1415,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // another Meso in the block") flows. Each source row is re-created as a new
   // phase_exercise pinned to activeDayId, in sort_order order, with its STT label
   // (A, B … G, or A1/A2 for supersets) preserved so nothing gets relabelled.
-  async function copyExercisesIntoActiveDay(source: PhaseExerciseRow[]) {
-    if (!activeDayId || source.length === 0) return
+  async function copyExercisesIntoDay(source: PhaseExerciseRow[], targetDayId: string) {
     const ordered = [...source].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 
     for (const pe of ordered) {
@@ -1426,7 +1428,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           target_rep_min:        pe.target_rep_min,
           target_rep_max:        pe.target_rep_max,
           rir_target:            pe.rir_target,
-          day_id:                activeDayId,
+          day_id:                targetDayId,
           order_label:           pe.order_label,
           loading_style:         pe.loading_style ?? 'horizontal',
           is_amrap:              pe.is_amrap,
@@ -1449,24 +1451,52 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     if (source.length === 0) return
 
     setCopyingDay(true)
-    await copyExercisesIntoActiveDay(source)
+    await copyExercisesIntoDay(source, activeDayId)
     setCopySourceDayId(null)
     setCopyingDay(false)
   }
 
-  // ── Copy a day from another Meso in the same block into the active day ─────────
-  // Lets the coach reuse a whole session built in a different mesocycle without
-  // rebuilding it by hand. The source meso's exercises are fetched on demand
-  // (crossPhaseExercises) since only the active phase's rows live in state.
-  async function copyCrossPhaseDay() {
-    if (!activeDayId || !copySourcePhaseId || !copyCrossDayId) return
-    const source = crossPhaseExercises.filter(pe => pe.day_id === copyCrossDayId)
-    if (source.length === 0) return
+  // ── Copy whole sessions (buổi) from another Meso into THIS meso ────────────────
+  // For each selected source day we CREATE a new day in the current split (draft,
+  // persisted when the coach saves the config) and clone all of that day's
+  // exercises into it. Lets a coach reuse e.g. every Fullbody session from Meso 1
+  // when building Meso 2 instead of rebuilding each one by hand.
+  async function copyCrossSessions() {
+    if (!splitType || !copySourcePhaseId || selectedCrossDayIds.size === 0) return
+    const srcPhase = phases.find(p => p.id === copySourcePhaseId)
+    const srcDays  = (srcPhase?.split_days ?? []) as SplitDay[]
+    // Preserve the source meso's day order; only days the coach ticked.
+    const chosen = srcDays.filter(d => selectedCrossDayIds.has(d.id))
+    if (chosen.length === 0) return
 
     setCopyingCross(true)
-    await copyExercisesIntoActiveDay(source)
+
+    // Build the new days first. Keep the source meso's own session names so the
+    // copy is recognisable; only disambiguate on an exact-label collision against
+    // both the existing split and the days we're adding in this same batch.
+    const working = [...splitDays]
+    const usedLabels = new Set(working.map(d => d.label))
+    const created: { newId: string; sourceDayId: string }[] = []
+    for (const srcDay of chosen) {
+      const newId = crypto.randomUUID()
+      let label = srcDay.label
+      for (let n = 2; usedLabels.has(label); n++) label = `${srcDay.label} (${n})`
+      usedLabels.add(label)
+      working.push({ id: newId, type: srcDay.type, label })
+      created.push({ newId, sourceDayId: srcDay.id })
+    }
+    setSplitDays(working)
+
+    // Clone each source day's exercises into its freshly-created day.
+    for (const { newId, sourceDayId } of created) {
+      const source = crossPhaseExercises.filter(pe => pe.day_id === sourceDayId)
+      await copyExercisesIntoDay(source, newId)
+    }
+
+    // Jump to the first newly-added day so the coach sees the result.
+    if (created[0]) setActiveDayId(created[0].newId)
     setCopySourcePhaseId(null)
-    setCopyCrossDayId(null)
+    setSelectedCrossDayIds(new Set())
     setCrossPhaseExercises([])
     setCopyingCross(false)
   }
@@ -2133,76 +2163,99 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
             )
           })()}
 
-          {/* Copy-from-another-meso — reuse a whole session built in a different
-              mesocycle of the same block. Pick a meso, then a day within it; the
-              day list is derived from that meso's exercises (loaded on demand). */}
-          {splitType && activeDay && (() => {
+          {/* Copy-whole-sessions-from-another-meso — replicate entire buổi tập
+              (new days + their exercises) built in a different mesocycle of the
+              same block. Pick a meso, tick the sessions to bring over (or all),
+              then "Sao chép" creates them in THIS meso. New days are draft until
+              the coach presses "Lưu cấu hình giáo án". */}
+          {splitType && (() => {
             const otherPhases = phases.filter(p => p.id !== selectedPhaseId)
             if (otherPhases.length === 0) return null
 
-            // Days of the chosen source meso that actually contain exercises,
-            // labelled from its saved split_days (fallback when a label is missing).
+            // Sessions of the chosen source meso (in its own order) that actually
+            // contain exercises — only those are worth copying.
             const srcPhase = phases.find(p => p.id === copySourcePhaseId) ?? null
-            const dayLabels = new Map(
-              (srcPhase?.split_days ?? []).map(d => [d.id, d.label]),
-            )
-            const crossDays: { id: string; label: string; count: number }[] = []
-            const seen = new Set<string>()
-            for (const pe of crossPhaseExercises) {
-              if (!pe.day_id || seen.has(pe.day_id)) continue
-              seen.add(pe.day_id)
-              crossDays.push({
-                id:    pe.day_id,
-                label: dayLabels.get(pe.day_id) ?? 'Buổi tập',
-                count: crossPhaseExercises.filter(x => x.day_id === pe.day_id).length,
-              })
-            }
+            const srcDays  = (srcPhase?.split_days ?? []) as SplitDay[]
+            const crossDays = srcDays
+              .map(d => ({
+                ...d,
+                count: crossPhaseExercises.filter(pe => pe.day_id === d.id).length,
+              }))
+              .filter(d => d.count > 0)
+            const allSelected = crossDays.length > 0 &&
+              crossDays.every(d => selectedCrossDayIds.has(d.id))
 
             return (
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-ink/8 bg-ink/3 px-4 py-2.5">
-                <span className="text-xs text-ink/55">
-                  Sao chép từ Meso khác trong khối vào “<span className="font-semibold text-ink">{activeDay.label}</span>”:
-                </span>
-                <select
-                  value={copySourcePhaseId ?? ''}
-                  onChange={e => {
-                    setCopySourcePhaseId(e.target.value || null)
-                    setCopyCrossDayId(null)
-                  }}
-                  className="rounded-lg border border-ink/15 bg-white px-2.5 py-1 text-xs text-ink focus:outline-none focus:border-amber"
-                >
-                  <option value="">— Chọn Meso —</option>
-                  {otherPhases.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-                {copySourcePhaseId && (
+              <div className="rounded-xl border border-ink/8 bg-ink/3 px-4 py-2.5 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-ink/55">
+                    Sao chép nguyên buổi tập từ Meso khác sang Meso này:
+                  </span>
                   <select
-                    value={copyCrossDayId ?? ''}
-                    onChange={e => setCopyCrossDayId(e.target.value || null)}
-                    disabled={loadingCrossPhase}
-                    className="rounded-lg border border-ink/15 bg-white px-2.5 py-1 text-xs text-ink focus:outline-none focus:border-amber disabled:opacity-50"
+                    value={copySourcePhaseId ?? ''}
+                    onChange={e => setCopySourcePhaseId(e.target.value || null)}
+                    className="rounded-lg border border-ink/15 bg-white px-2.5 py-1 text-xs text-ink focus:outline-none focus:border-amber"
                   >
-                    <option value="">
-                      {loadingCrossPhase
-                        ? 'Đang tải…'
-                        : crossDays.length === 0 ? '— Meso này chưa có bài —' : '— Chọn buổi nguồn —'}
-                    </option>
-                    {crossDays.map(d => (
-                      <option key={d.id} value={d.id}>
-                        {d.label} ({d.count} bài)
-                      </option>
+                    <option value="">— Chọn Meso nguồn —</option>
+                    {otherPhases.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
+                </div>
+
+                {copySourcePhaseId && (
+                  loadingCrossPhase ? (
+                    <p className="text-xs text-ink/45">Đang tải các buổi tập…</p>
+                  ) : crossDays.length === 0 ? (
+                    <p className="text-xs text-ink/45">Meso này chưa có buổi tập nào có bài.</p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCrossDayIds(
+                            allSelected ? new Set() : new Set(crossDays.map(d => d.id)),
+                          )}
+                          className="text-xs font-semibold text-ink/55 hover:text-ink px-2 py-1 rounded hover:bg-ink/5 transition-colors"
+                        >
+                          {allSelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                        </button>
+                        {crossDays.map(d => {
+                          const checked = selectedCrossDayIds.has(d.id)
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() => setSelectedCrossDayIds(prev => {
+                                const next = new Set(prev)
+                                if (next.has(d.id)) next.delete(d.id); else next.add(d.id)
+                                return next
+                              })}
+                              className={cn(
+                                'text-xs px-2.5 py-1 rounded-lg border transition-colors',
+                                checked
+                                  ? 'bg-amber/15 text-amber border-amber/40 font-semibold'
+                                  : 'bg-white text-ink/70 border-ink/15 hover:border-ink/30',
+                              )}
+                            >
+                              {checked ? '✓ ' : ''}{d.label} ({d.count} bài)
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void copyCrossSessions()}
+                        disabled={selectedCrossDayIds.size === 0 || copyingCross}
+                      >
+                        {copyingCross
+                          ? 'Đang sao chép…'
+                          : `Sao chép ${selectedCrossDayIds.size || ''} buổi`.trim()}
+                      </Button>
+                    </>
+                  )
                 )}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void copyCrossPhaseDay()}
-                  disabled={!copyCrossDayId || copyingCross || loadingCrossPhase}
-                >
-                  {copyingCross ? 'Đang sao chép…' : 'Sao chép'}
-                </Button>
               </div>
             )
           })()}
