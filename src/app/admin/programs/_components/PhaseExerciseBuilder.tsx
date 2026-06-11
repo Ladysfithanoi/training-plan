@@ -1387,14 +1387,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     if (source.length === 0) return
 
     setCopyingDay(true)
-    // Horizontal labels continue from however many the active day already has.
-    let horizCount = phaseExercises.filter(pe => pe.day_id === activeDayId).length
 
     for (const pe of source) {
-      const isVertical = pe.loading_style === 'vertical'
-      const label = isVertical
-        ? pe.order_label
-        : computeHorizontalLabel(horizCount++)
+      // Faithful copy — keep the source row's STT label (A, B … G, or A1/A2 for
+      // supersets) so a custom-labelled standalone exercise isn't relabelled.
+      const label = pe.order_label
       const res = await fetch(`/api/phases/${selectedPhaseId}/exercises`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
