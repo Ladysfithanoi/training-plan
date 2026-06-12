@@ -127,6 +127,14 @@ export function ProgramBuilder({
   const [blockDesc,   setBlockDesc]   = useState('')
   const [preset,      setPreset]      = useState<keyof typeof PRESETS | 'custom'>('classic_3_meso')
 
+  // ── Edit block (name + description) modal ──────────────────────────────────
+  const [editOpen,    setEditOpen]    = useState(false)
+  const [editing,     setEditing]     = useState(false)
+  const [editError,   setEditError]   = useState<string | null>(null)
+  const [editId,      setEditId]      = useState<string | null>(null)
+  const [editName,    setEditName]    = useState('')
+  const [editDesc,    setEditDesc]    = useState('')
+
   // ── Delete confirmation (replaces window.confirm) ──────────────────────────
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const confirmDeleteBlock = blocks.find(b => b.id === confirmDeleteId) ?? null
@@ -202,6 +210,60 @@ export function ProgramBuilder({
     }
 
     setCreating(false)
+  }
+
+  function openEditModal(block: BlockWithPhases) {
+    setEditId(block.id)
+    setEditName(block.name)
+    setEditDesc(block.description ?? '')
+    setEditError(null)
+    setEditOpen(true)
+  }
+
+  async function handleUpdate() {
+    if (!editId || !editName.trim()) return
+    setEditing(true)
+    setEditError(null)
+
+    try {
+      const res = await fetch(`/api/programs/${editId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name:        editName.trim(),
+          description: editDesc.trim() || null,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setEditError(data.error ?? `Lỗi máy chủ (${res.status})`)
+        setEditing(false)
+        return
+      }
+
+      const { block } = data
+      // Patch the shared state so section 1 + 2 update instantly. Keep the
+      // existing phases (PATCH only returns the block row, not its phases).
+      onBlocksChange(prev =>
+        prev.map(b =>
+          b.id === editId
+            ? { ...b, name: block.name, description: block.description }
+            : b,
+        ),
+      )
+      setEditOpen(false)
+      setEditError(null)
+      // Re-fetch server data so every other view (assignments, athlete pages,
+      // coach selector…) that reads this block by id shows the new name/desc.
+      router.refresh()
+    } catch (err) {
+      console.error('handleUpdate error:', err)
+      setEditError('Không thể kết nối đến máy chủ. Vui lòng thử lại.')
+    }
+
+    setEditing(false)
   }
 
   async function handleDelete(blockId: string) {
@@ -415,15 +477,25 @@ export function ProgramBuilder({
                 </div>
               </div>
               {canEdit(selectedBlock) && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setConfirmDeleteId(selectedBlock.id)}
-                  className="text-danger hover:bg-danger/8 shrink-0"
-                >
-                  Xoá khối tập
-                </Button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openEditModal(selectedBlock)}
+                  >
+                    Sửa
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmDeleteId(selectedBlock.id)}
+                    className="text-danger hover:bg-danger/8"
+                  >
+                    Xoá khối tập
+                  </Button>
+                </div>
               )}
             </div>
 
@@ -669,6 +741,68 @@ export function ProgramBuilder({
               variant="secondary"
               onClick={() => setCreateOpen(false)}
               disabled={creating}
+            >
+              Huỷ
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Edit Block Modal (name + description) ──────────────────────────── */}
+      <Modal
+        open={editOpen}
+        onClose={() => { setEditOpen(false); setEditError(null) }}
+        title="Sửa Khối Tập Luyện"
+        size="lg"
+      >
+        <div className="space-y-5">
+          <Input
+            label="Tên khối tập"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            placeholder="VD: Khối Tăng Cơ Mùa Hè"
+            required
+          />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+              Mô tả (tuỳ chọn)
+            </label>
+            <textarea
+              rows={2}
+              value={editDesc}
+              onChange={e => setEditDesc(e.target.value)}
+              placeholder="Ghi chú ngắn về mục tiêu của khối tập..."
+              className="w-full rounded-lg border border-ink/15 px-3 py-2.5 text-sm text-ink bg-white placeholder:text-ink/35 focus:border-amber focus:ring-1 focus:ring-amber outline-none resize-none"
+            />
+          </div>
+
+          <p className="text-xs text-ink/45">
+            Đổi tên hoặc mô tả sẽ tự cập nhật ở mọi nơi dùng khối tập này
+            (giáo án đã giao cho học viên, lịch tập cá nhân…).
+          </p>
+
+          {editError && (
+            <p className="rounded-lg bg-danger/8 border border-danger/20 px-3 py-2 text-sm text-danger">
+              {editError}
+            </p>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              type="button"
+              variant="primary"
+              loading={editing}
+              onClick={handleUpdate}
+              disabled={!editName.trim() || editing}
+              className="flex-1"
+            >
+              Lưu thay đổi
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setEditOpen(false); setEditError(null) }}
+              disabled={editing}
             >
               Huỷ
             </Button>
