@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Card, CardBody } from '@/components/ui/Card'
 import { GLOSSARY } from '@/lib/glossary'
 
 export const metadata = { title: 'Hướng dẫn sử dụng' }
@@ -14,6 +13,7 @@ const COACH_STEPS: Step[] = [
   { title: 'Chuẩn bị giáo án', desc: 'Vào “Giáo án tập luyện” để tạo khối tập của riêng bạn, hoặc dùng lại giáo án có sẵn trong kho chung (chỉ xem, không sửa được của người khác).' },
   { title: 'Giao giáo án', desc: 'Ở “Danh sách Học viên”, bấm “Giáo án” để gán một khối tập cho học viên và chọn ngày bắt đầu.' },
   { title: 'Gửi liên kết', desc: 'Bấm “🔗 Gửi link” để tạo magic link — học viên mở link là ghi được buổi tập, không cần tài khoản.' },
+  { title: 'Học viên tự đăng nhập theo dõi', desc: 'Ngoài magic link, học viên còn có thể đăng nhập thẳng vào web bằng email & mật khẩu bạn đã tạo lúc thêm tài khoản. Sau khi đăng nhập, họ tự xem “Chương trình của tôi” và “Tiến độ tập luyện” (biểu đồ khối lượng, e1RM…). Hãy gửi cho học viên địa chỉ web cùng email/mật khẩu đăng nhập.' },
   { title: 'Theo dõi tiến độ', desc: 'Xem “Bảng điều khiển HLV” cho hoạt động gần đây, hoặc mở “📊 Tiến độ” của từng học viên để xem biểu đồ khối lượng & e1RM.' },
 ]
 
@@ -42,6 +42,43 @@ const STUDENT_STEPS: Step[] = [
   { title: 'Đánh giá cuối buổi', desc: 'Hoàn thành nhanh phần “Đánh giá buổi tập” — app sẽ gợi ý điều chỉnh tải cho tuần sau.' },
   { title: 'Xem tiến độ', desc: 'Mở “Tiến độ tập luyện” để theo dõi khối lượng, sức mạnh ước tính (e1RM) tăng dần theo thời gian.' },
 ]
+
+/**
+ * Collapsible section built on native <details> so it works inside a server
+ * component without client-side JS. Keeps the long guide compact — only the
+ * first section is open by default; the rest expand on demand.
+ */
+function Accordion({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group rounded-2xl border border-ink/8 bg-white overflow-hidden"
+    >
+      <summary className="flex items-center justify-between gap-3 cursor-pointer select-none list-none px-5 py-4 hover:bg-ink/[0.015] transition-colors [&::-webkit-details-marker]:hidden">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/60">
+          {title}
+        </h2>
+        <svg
+          className="h-4 w-4 shrink-0 text-ink/40 transition-transform group-open:rotate-180"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </summary>
+      <div className="px-5 pb-5 pt-1 border-t border-ink/5">{children}</div>
+    </details>
+  )
+}
 
 function StepList({ steps }: { steps: Step[] }) {
   return (
@@ -101,68 +138,50 @@ export default async function GuidePage() {
         </div>
       )}
 
-      {/* Quick start */}
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
-          {isStaff ? 'Bắt đầu nhanh — Quản lý học viên' : 'Bắt đầu nhanh'}
-        </h2>
-        <Card>
-          <CardBody>
-            <StepList steps={steps} />
-          </CardBody>
-        </Card>
-      </section>
+      {/* Collapsible sections — keep the guide compact: only the first opens
+          by default, the rest expand on demand so there is far less scrolling. */}
+      <div className="space-y-3">
+        <Accordion
+          title={isStaff ? 'Bắt đầu nhanh — Quản lý học viên' : 'Bắt đầu nhanh'}
+          defaultOpen
+        >
+          <StepList steps={steps} />
+        </Accordion>
 
-      {/* Coach/Admin: train for yourself */}
-      {isStaff && (
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
-            Tự chọn lịch tập cho bản thân
-          </h2>
-          <p className="text-sm text-ink/55 -mt-2 mb-4 leading-relaxed">
-            HLV/Admin cũng có thể tự tập theo giáo án giống học viên. Các bước dưới đây hướng dẫn cách
-            chọn và theo dõi lịch tập của riêng bạn trong mục “Lịch tập của tôi”.
-          </p>
-          <Card>
-            <CardBody>
-              <StepList steps={COACH_SELF_STEPS} />
-            </CardBody>
-          </Card>
-        </section>
-      )}
+        {/* Coach/Admin: train for yourself */}
+        {isStaff && (
+          <Accordion title="Tự chọn lịch tập cho bản thân">
+            <p className="text-sm text-ink/55 mb-4 leading-relaxed">
+              HLV/Admin cũng có thể tự tập theo giáo án giống học viên. Các bước dưới đây hướng dẫn cách
+              chọn và theo dõi lịch tập của riêng bạn trong mục “Lịch tập của tôi”.
+            </p>
+            <StepList steps={COACH_SELF_STEPS} />
+          </Accordion>
+        )}
 
-      {/* Coach/Admin: build a program (block → meso → config → exercises) */}
-      {isStaff && (
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
-            Xây dựng giáo án — khối tập, meso & cấu hình
-          </h2>
-          <p className="text-sm text-ink/55 -mt-2 mb-4 leading-relaxed">
-            Hướng dẫn tạo một giáo án hoàn chỉnh: thêm khối tập mới, thêm các giai đoạn (meso),
-            chỉnh cấu hình split của chương trình rồi gán bài tập cho từng ngày.
-          </p>
-          <Card>
-            <CardBody>
-              <StepList steps={COACH_BUILD_STEPS} />
-            </CardBody>
-          </Card>
-        </section>
-      )}
+        {/* Coach/Admin: build a program (block → meso → config → exercises) */}
+        {isStaff && (
+          <Accordion title="Xây dựng giáo án — khối tập, meso & cấu hình">
+            <p className="text-sm text-ink/55 mb-4 leading-relaxed">
+              Hướng dẫn tạo một giáo án hoàn chỉnh: thêm khối tập mới, thêm các giai đoạn (meso),
+              chỉnh cấu hình split của chương trình rồi gán bài tập cho từng ngày.
+            </p>
+            <StepList steps={COACH_BUILD_STEPS} />
+          </Accordion>
+        )}
 
-      {/* Glossary */}
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">
-          Thuật ngữ thường gặp
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {Object.values(GLOSSARY).map(entry => (
-            <div key={entry.term} className="rounded-xl border border-ink/8 bg-white px-4 py-3">
-              <p className="font-semibold text-sm text-ink">{entry.term}</p>
-              <p className="text-sm text-ink/55 mt-1 leading-relaxed">{entry.def}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+        {/* Glossary */}
+        <Accordion title="Thuật ngữ thường gặp">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Object.values(GLOSSARY).map(entry => (
+              <div key={entry.term} className="rounded-xl border border-ink/8 bg-white px-4 py-3">
+                <p className="font-semibold text-sm text-ink">{entry.term}</p>
+                <p className="text-sm text-ink/55 mt-1 leading-relaxed">{entry.def}</p>
+              </div>
+            ))}
+          </div>
+        </Accordion>
+      </div>
 
       <p className="text-xs text-ink/35">
         Cần hỗ trợ thêm? Liên hệ quản trị viên của bạn.
