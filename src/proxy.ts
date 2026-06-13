@@ -51,8 +51,19 @@ export async function proxy(request: NextRequest) {
     path.startsWith('/_next') ||
     path.startsWith('/favicon')
 
-  // Redirect unauthenticated users to /login
+  // Unauthenticated access to a protected path.
   if (!user && !isPublicPath) {
+    // API routes must answer with JSON — never redirect a fetch() to the HTML
+    // login page. A 307 → /login makes the browser follow into an HTML
+    // document, which surfaces in the client as a cryptic "Failed to fetch" or
+    // a JSON-parse error instead of a usable message. Return 401 so the caller
+    // can show "phiên đã hết hạn, đăng nhập lại".
+    if (path.startsWith('/api/')) {
+      return NextResponse.json(
+        { error: 'Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang và đăng nhập lại.' },
+        { status: 401 },
+      )
+    }
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
