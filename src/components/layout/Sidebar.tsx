@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { Profile } from '@/types'
 import { Logo } from './Logo'
+import { TrialCountdown } from './TrialCountdown'
 
 interface NavItem {
   href:      string
@@ -115,12 +116,14 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
   }, [open])
 
   const isAdmin  = profile.role === 'admin'
-  // Staff = admin or coach (HLV); both get the management section.
-  const isStaff  = profile.role === 'admin' || profile.role === 'coach'
-  const staffSectionLabel = isAdmin ? 'Quản trị viên / HLV' : 'Huấn luyện viên'
+  const isTrial  = profile.role === 'trial'
+  // Staff = admin, coach (HLV), or trial (Trải nghiệm); all get the coach UI shell.
+  const isStaff  = isAdmin || profile.role === 'coach' || isTrial
+  const staffSectionLabel = isAdmin ? 'Quản trị viên / HLV' : isTrial ? 'Trải nghiệm HLV' : 'Huấn luyện viên'
   const roleLabel =
     profile.role === 'admin' ? 'Quản trị viên'
     : profile.role === 'coach' ? 'Huấn luyện viên'
+    : isTrial ? 'Trải nghiệm'
     : 'Học viên'
 
   function isActive(href: string) {
@@ -237,6 +240,9 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
 
       {/* ── User footer ──────────────────────────────────────────────────────── */}
       <div className="border-t border-ink/8 p-3">
+        {/* Trial (Trải nghiệm) countdown — only for trial accounts */}
+        {isTrial && <TrialCountdown expiresAt={profile.trial_expires_at} />}
+
         <div className="flex items-center gap-2.5 mb-2.5">
           <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink shrink-0">
             {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}

@@ -16,8 +16,10 @@ export default async function LibraryPage() {
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin' && profile?.role !== 'coach') redirect('/dashboard')
+  if (profile?.role !== 'admin' && profile?.role !== 'coach' && profile?.role !== 'trial') redirect('/dashboard')
   const isAdmin = profile?.role === 'admin'
+  // Trial (Trải nghiệm) accounts browse the bank read-only; no authoring.
+  const canAuthor = profile?.role === 'admin' || profile?.role === 'coach'
 
   const [{ data: patterns }, { data: exercises }] = await Promise.all([
     supabase.from('movement_patterns').select('*').order('name'),
@@ -37,6 +39,7 @@ export default async function LibraryPage() {
         initialExercises={(exercises as any[]) ?? []}
         currentUserId={user.id}
         isAdmin={isAdmin}
+        canAuthor={canAuthor}
       />
     </div>
   )

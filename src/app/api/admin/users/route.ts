@@ -6,6 +6,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireStaff } from '@/lib/auth'
+import { freshTrialWindow } from '@/lib/trial'
 
 // ── Shared admin-client factory (module-scoped helper, server-only) ──────────
 // Defined here rather than imported from lib so the env-var reads stay inside
@@ -62,12 +63,16 @@ export async function POST(request: Request) {
   }
 
   // ── Ownership / role rules ─────────────────────────────────────────────────
-  // Coaches may only create students (role 'user') and own everyone they create.
-  // Admins may create any role and the new account is left unowned (NULL).
-  const isCoach = caller.role === 'coach'
-  if (isCoach) role = 'user'
-  if (!['user', 'coach', 'admin'].includes(role)) role = 'user'
-  const createdBy: string | null = isCoach ? caller.id : null
+  // Only admins may pick a role / create privileged accounts; everyone else
+  // (coach AND trial) may create students (role 'user') only, and owns them.
+  // Only admins may create 'trial' (Trải nghiệm) accounts.
+  const isAdmin = caller.role === 'admin'
+  if (!isAdmin) role = 'user'
+  if (!['user', 'coach', 'admin', 'trial'].includes(role)) role = 'user'
+  const createdBy: string | null = isAdmin ? null : caller.id
+
+  // Trial accounts start with a fresh 5-hour activation window.
+  const trialFields = role === 'trial' ? freshTrialWindow() : {}
 
   // ── Step 1: Create auth user (bypasses signup restrictions) ───────────────
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -97,10 +102,15 @@ export async function POST(request: Request) {
         full_name:  full_name ?? null,
         role,
         created_by: createdBy,
+        ...trialFields,
       },
       { onConflict: 'id', ignoreDuplicates: false },
     )
-    .select('id, email, full_name, role, created_by, created_at')
+    // Select '*' (not a fixed column list) so this keeps working before
+    // migration 008 adds the trial_* columns. trialFields is empty unless the
+    // admin explicitly created a 'trial' account, so non-trial creation never
+    // references the new columns.
+    .select('*')
     .single()
 
   if (profileError || !profile) {
@@ -139,8 +149,8 @@ export async function GET() {
     .select('*')
     .order('created_at', { ascending: false })
 
-  // Coaches only see students they created.
-  if (caller.role === 'coach') query = query.eq('created_by', caller.id)
+  // Non-admins (coach / trial) only see students they created.
+  if (caller.role !== 'admin') query = query.eq('created_by', caller.id)
 
   const { data: profiles, error } = await query
 

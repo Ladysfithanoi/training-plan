@@ -109,8 +109,9 @@ export default async function GuidePage() {
     .eq('id', user.id)
     .single()
 
-  const isStaff = profile?.role === 'admin' || profile?.role === 'coach'
-  const isCoach = profile?.role === 'coach'
+  // Trial (Trải nghiệm) accounts use the coach UI, so they get the coach guide.
+  const isStaff = profile?.role === 'admin' || profile?.role === 'coach' || profile?.role === 'trial'
+  const isCoach = profile?.role === 'coach' || profile?.role === 'trial'
   const steps = isStaff ? COACH_STEPS : STUDENT_STEPS
 
   return (

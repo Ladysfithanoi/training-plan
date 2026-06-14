@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
+import { trialState } from '@/lib/trial'
 import type { Profile, TrainingBlock } from '@/types'
 
 interface UsersManagerProps {
@@ -18,7 +19,7 @@ interface UsersManagerProps {
   isAdmin: boolean
 }
 
-type ManagedRole = 'user' | 'coach' | 'admin'
+type ManagedRole = 'user' | 'coach' | 'admin' | 'trial'
 
 const PAGE_SIZE = 5
 
@@ -58,6 +59,9 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
 
   // Xoá học viên — replaces window.confirm() with <ConfirmModal>
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+
+  // Kích hoạt / Tạm ngưng tài khoản Trải nghiệm
+  const [trialBusyId, setTrialBusyId] = useState<string | null>(null)
 
   // Phân trang
   const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE))
@@ -209,16 +213,35 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
     }
   }
 
+  async function handleTrialAction(userId: string, action: 'activate' | 'deactivate') {
+    setTrialBusyId(userId)
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trial_action: action }),
+      })
+      const data = await res.json()
+      if (res.ok && data.profile) {
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, ...data.profile } : u))
+      }
+    } finally {
+      setTrialBusyId(null)
+    }
+  }
+
   const ROLE_LABELS: Record<string, string> = {
     admin: 'Quản trị viên',
     coach: 'HLV',
     user: 'Học viên',
+    trial: 'Trải nghiệm',
   }
 
   // Role options shown in the create/edit selects (admin only).
   const ROLE_OPTIONS = [
     { value: 'user', label: 'Học viên' },
     { value: 'coach', label: 'Huấn luyện viên (HLV)' },
+    { value: 'trial', label: 'Trải nghiệm (5 tiếng)' },
     { value: 'admin', label: 'Quản trị viên' },
   ]
 
@@ -283,18 +306,30 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
                     {user.email}
                   </td>
 
-                  {/* Vai trò — badge stays on one line */}
+                  {/* Vai trò — badge stays on one line; trial shows Active/Deactive note */}
                   <td className="px-3 py-3.5 text-center whitespace-nowrap">
-                    <div className="flex justify-center">
+                    <div className="flex flex-col items-center gap-1">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
                         user.role === 'admin'
                           ? 'bg-ink/10 text-ink'
                           : user.role === 'coach'
                             ? 'bg-amber/10 text-amber'
-                            : 'bg-herb/10 text-herb'
+                            : user.role === 'trial'
+                              ? 'bg-violet-100 text-violet-700'
+                              : 'bg-herb/10 text-herb'
                       }`}>
                         {ROLE_LABELS[user.role] ?? user.role}
                       </span>
+                      {user.role === 'trial' && (() => {
+                        const st = trialState(user)
+                        const active = st === 'active'
+                        return (
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${active ? 'text-herb' : 'text-danger'}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-herb' : 'bg-danger'}`} />
+                            {active ? 'Active' : 'Deactive'}
+                          </span>
+                        )
+                      })()}
                     </div>
                   </td>
 
@@ -324,6 +359,30 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
                       >
                         Sửa
                       </Button>
+
+                      {user.role === 'trial' && (
+                        trialState(user) === 'active' ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={trialBusyId === user.id}
+                            onClick={() => handleTrialAction(user.id, 'deactivate')}
+                            className="shrink-0 text-danger border-danger/30 hover:bg-danger/8 hover:border-danger/50"
+                          >
+                            Tạm ngưng
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="herb"
+                            loading={trialBusyId === user.id}
+                            onClick={() => handleTrialAction(user.id, 'activate')}
+                            className="shrink-0"
+                          >
+                            Kích hoạt 5h
+                          </Button>
+                        )
+                      )}
 
                       {user.role === 'user' && (
                         <Button

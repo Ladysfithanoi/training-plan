@@ -1,5 +1,6 @@
 import { requireStaff } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/server'
+import { freshTrialWindow } from '@/lib/trial'
 import type { Profile } from '@/types'
 
 /**
@@ -67,6 +68,28 @@ export async function PATCH(
   // Only admins may change roles; a coach's student stays a 'user'.
   if (body.role !== undefined && guard.caller.role === 'admin') {
     updatePayload.role = body.role
+    // Only touch the trial_* columns when 'trial' is actually involved on one
+    // side of the transition. This keeps ordinary role edits (user↔coach↔admin)
+    // from referencing columns that migration 008 may not have added yet.
+    if (body.role === 'trial' && guard.target.role !== 'trial') {
+      // Promoting to trial → open a fresh 5-hour window.
+      Object.assign(updatePayload, freshTrialWindow())
+    } else if (body.role !== 'trial' && guard.target.role === 'trial') {
+      // Demoting away from trial → clear the window fields.
+      updatePayload.trial_active = null
+      updatePayload.trial_expires_at = null
+    }
+  }
+
+  // ── Trial activation control (admin only) ─────────────────────────────────
+  // 'activate'   → switch on + reset the 5-hour window (now + 5h).
+  // 'deactivate' → switch off immediately (account can no longer access).
+  if (body.trial_action !== undefined && guard.caller.role === 'admin') {
+    if (body.trial_action === 'activate') {
+      Object.assign(updatePayload, freshTrialWindow())
+    } else if (body.trial_action === 'deactivate') {
+      updatePayload.trial_active = false
+    }
   }
 
   const { data, error } = await guard.admin

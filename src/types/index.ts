@@ -1,6 +1,8 @@
 // ─── Domain enums ────────────────────────────────────────────────────────────
 //   admin — super user; coach (HLV) — staff with a private roster; user — student.
-export type UserRole = 'admin' | 'coach' | 'user'
+//   trial (Trải nghiệm) — time-boxed coach-like preview; can browse & assign
+//   existing content but cannot author training blocks / programs (migration 008).
+export type UserRole = 'admin' | 'coach' | 'user' | 'trial'
 
 // ─── Post-workout autoregulation survey ──────────────────────────────────────
 /** Did the athlete beat, meet, or miss their rep target? */
@@ -49,6 +51,12 @@ export interface Profile {
   magic_token?: string | null
   /** Which coach created this student — null = owned by admin (migration 007) */
   created_by?: string | null
+
+  // ── Trial (Trải nghiệm) role fields (migration 008) — only meaningful when role='trial' ──
+  /** Admin-controlled on/off switch for a trial account. */
+  trial_active?: boolean | null
+  /** ISO timestamp when the current 5-hour trial window ends. */
+  trial_expires_at?: string | null
 }
 
 // ─── Movement Patterns ───────────────────────────────────────────────────────

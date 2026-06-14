@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireStaff } from '@/lib/auth'
+import { requireContentAuthor } from '@/lib/auth'
 
 // Columns added by later migrations — may not exist on the live DB yet.
 // 006: is_amrap, target_percentage_1rm   ·   008: sort_order
@@ -46,7 +46,7 @@ export async function GET(_req: Request, ctx: RouteContext<'/api/phases/[id]/exe
 
 /** POST /api/phases/[id]/exercises — add an exercise to a phase */
 export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]/exercises'>) {
-  try { await requireStaff() } catch {
+  try { await requireContentAuthor() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -110,7 +110,7 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
  * Inline-update any writable field on a specific phase_exercise row.
  */
 export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id]/exercises'>) {
-  try { await requireStaff() } catch {
+  try { await requireContentAuthor() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -199,7 +199,7 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
 
 /** DELETE /api/phases/[id]/exercises?phase_exercise_id=<uuid> — remove from phase */
 export async function DELETE(request: Request, ctx: RouteContext<'/api/phases/[id]/exercises'>) {
-  try { await requireStaff() } catch {
+  try { await requireContentAuthor() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 

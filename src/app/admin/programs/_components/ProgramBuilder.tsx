@@ -96,6 +96,8 @@ interface ProgramBuilderProps {
   onBlocksChange: (updater: (prev: BlockWithPhases[]) => BlockWithPhases[]) => void
   currentUserId: string
   isAdmin: boolean
+  /** False for trial (Trải nghiệm) accounts — hides create/edit/delete block UI. */
+  canAuthor: boolean
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -109,11 +111,13 @@ export function ProgramBuilder({
   onBlocksChange,
   currentUserId,
   isAdmin,
+  canAuthor,
 }: ProgramBuilderProps) {
   const router = useRouter()
 
-  /** Coaches may edit/delete only blocks they created; admins edit anything. */
-  const canEdit = (b: BlockWithPhases) => isAdmin || b.created_by === currentUserId
+  /** Coaches may edit/delete only blocks they created; admins edit anything;
+   *  trial accounts (canAuthor=false) can never edit. */
+  const canEdit = (b: BlockWithPhases) => canAuthor && (isAdmin || b.created_by === currentUserId)
 
   // ── Sort + pagination state ────────────────────────────────────────────────
   const [sortKey,     setSortKey]     = useState<SortKey>('date_desc')
@@ -291,9 +295,11 @@ export function ProgramBuilder({
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50">
             Các Khối Tập
           </h2>
-          <Button size="sm" type="button" onClick={openCreateModal}>
-            + Tạo mới
-          </Button>
+          {canAuthor && (
+            <Button size="sm" type="button" onClick={openCreateModal}>
+              + Tạo mới
+            </Button>
+          )}
         </div>
 
         {/* ── Sort toolbar ─────────────────────────────────────────────────── */}

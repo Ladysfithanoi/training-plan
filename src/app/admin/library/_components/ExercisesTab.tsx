@@ -14,6 +14,8 @@ interface Props {
   onExercisesChange: (exercises: Exercise[]) => void
   currentUserId: string
   isAdmin: boolean
+  /** False for trial (Trải nghiệm) — no create / import / edit. */
+  canAuthor: boolean
 }
 
 const PAGE_SIZE = 10
@@ -50,9 +52,10 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
-export function ExercisesTab({ exercises: initialExercises, patterns, onExercisesChange, currentUserId, isAdmin }: Props) {
-  /** Coaches may edit/delete only exercises they created; admins edit anything. */
-  const canEdit = (ex: Exercise) => isAdmin || ex.created_by === currentUserId
+export function ExercisesTab({ exercises: initialExercises, patterns, onExercisesChange, currentUserId, isAdmin, canAuthor }: Props) {
+  /** Coaches may edit/delete only exercises they created; admins edit anything;
+   *  trial accounts (canAuthor=false) can never edit. */
+  const canEdit = (ex: Exercise) => canAuthor && (isAdmin || ex.created_by === currentUserId)
   const [exercises, setExercises] = useState(initialExercises)
   const [page, setPage] = useState(1)
   const [query, setQuery] = useState('')
@@ -207,19 +210,23 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
           <option value="">Tất cả Chuỗi Chuyển Động</option>
           {patterns.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <Button variant="secondary" onClick={() => setImportOpen(true)}>
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-          </svg>
-          Nhập tệp Excel/CSV
-        </Button>
-        <Button onClick={openCreate}>
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Thêm Bài Tập Mới
-        </Button>
+        {canAuthor && (
+          <>
+            <Button variant="secondary" onClick={() => setImportOpen(true)}>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+              </svg>
+              Nhập tệp Excel/CSV
+            </Button>
+            <Button onClick={openCreate}>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Thêm Bài Tập Mới
+            </Button>
+          </>
+        )}
       </div>
 
       {/* Bảng bài tập — responsive wrapper */}

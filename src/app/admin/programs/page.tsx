@@ -18,8 +18,11 @@ export default async function AdminProgramsPage() {
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin' && profile?.role !== 'coach') redirect('/dashboard')
+  if (profile?.role !== 'admin' && profile?.role !== 'coach' && profile?.role !== 'trial') redirect('/dashboard')
   const isAdmin = profile?.role === 'admin'
+  // Trial (Trải nghiệm) accounts may browse & assign existing blocks but cannot
+  // author content (create/edit blocks, phases). Admins and coaches can.
+  const canAuthor = profile?.role === 'admin' || profile?.role === 'coach'
 
   const [{ data: blocks }, { data: exercises }, { data: patterns }] = await Promise.all([
     supabase
@@ -56,6 +59,7 @@ export default async function AdminProgramsPage() {
         patterns={(patterns ?? []) as MovementPattern[]}
         currentUserId={user.id}
         isAdmin={isAdmin}
+        canAuthor={canAuthor}
       />
     </div>
   )

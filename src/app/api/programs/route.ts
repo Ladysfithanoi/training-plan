@@ -1,4 +1,4 @@
-import { requireStaff } from '@/lib/auth'
+import { requireContentAuthor } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import type { PhaseType, RepRange } from '@/types'
 
@@ -138,7 +138,7 @@ export async function GET() {
 export async function POST(request: Request) {
   let profile
   try {
-    profile = await requireStaff()
+    profile = await requireContentAuthor()
   } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }

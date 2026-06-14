@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireStaff } from '@/lib/auth'
+import { requireContentAuthor } from '@/lib/auth'
 
 /**
  * POST /api/exercises/import
@@ -8,7 +8,7 @@ import { requireStaff } from '@/lib/auth'
  */
 export async function POST(request: Request) {
   let profile
-  try { profile = await requireStaff() } catch {
+  try { profile = await requireContentAuthor() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 

@@ -11,9 +11,11 @@ interface LibraryTabsProps {
   initialExercises: Exercise[]
   currentUserId: string
   isAdmin: boolean
+  /** False for trial (Trải nghiệm) — exercise bank is read-only. */
+  canAuthor: boolean
 }
 
-export function LibraryTabs({ initialPatterns, initialExercises, currentUserId, isAdmin }: LibraryTabsProps) {
+export function LibraryTabs({ initialPatterns, initialExercises, currentUserId, isAdmin, canAuthor }: LibraryTabsProps) {
   const [activeTab, setActiveTab] = useState('exercises')
   const [patterns, setPatterns] = useState(initialPatterns)
   const [exercises, setExercises] = useState(initialExercises)
@@ -55,6 +57,7 @@ export function LibraryTabs({ initialPatterns, initialExercises, currentUserId, 
           onExercisesChange={setExercises}
           currentUserId={currentUserId}
           isAdmin={isAdmin}
+          canAuthor={canAuthor}
         />
       )}
       {activeTab === 'patterns' && (

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireStaff } from '@/lib/auth'
+import { requireContentAuthor } from '@/lib/auth'
 
 /**
  * Verify the caller may mutate this exercise.
@@ -9,7 +9,7 @@ import { requireStaff } from '@/lib/auth'
 async function guardOwnership(id: string) {
   let profile
   try {
-    profile = await requireStaff()
+    profile = await requireContentAuthor()
   } catch {
     return { error: Response.json({ error: 'Forbidden' }, { status: 403 }) }
   }

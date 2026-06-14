@@ -27,9 +27,11 @@ interface ProgramsWorkspaceProps {
   patterns:  MovementPattern[]
   currentUserId: string
   isAdmin: boolean
+  /** False for trial (Trải nghiệm) accounts — hides all content-authoring UI. */
+  canAuthor: boolean
 }
 
-export function ProgramsWorkspace({ blocks: initialBlocks, exercises, patterns, currentUserId, isAdmin }: ProgramsWorkspaceProps) {
+export function ProgramsWorkspace({ blocks: initialBlocks, exercises, patterns, currentUserId, isAdmin, canAuthor }: ProgramsWorkspaceProps) {
   // Single source of truth for the blocks (with phases), shared by BOTH sections
   // so an edit in section 2 (PhaseExerciseBuilder) instantly updates the
   // structure/timeline/rep-matrix in section 1 (ProgramBuilder).
@@ -43,9 +45,10 @@ export function ProgramsWorkspace({ blocks: initialBlocks, exercises, patterns, 
     (initialBlocks.find(b => (b.phases ?? []).length > 0) ?? initialBlocks[0])?.id ?? '',
   )
 
-  // Coaches may only edit blocks they created; admins may edit anything.
+  // Coaches may only edit blocks they created; admins may edit anything; trial
+  // accounts (canAuthor=false) can never edit content.
   const selectedBlock = blocks.find(b => b.id === selectedBlockId) ?? null
-  const canEditSelected = isAdmin || (selectedBlock?.created_by === currentUserId)
+  const canEditSelected = canAuthor && (isAdmin || selectedBlock?.created_by === currentUserId)
 
   return (
     <div className="space-y-10">
@@ -65,6 +68,7 @@ export function ProgramsWorkspace({ blocks: initialBlocks, exercises, patterns, 
           onBlocksChange={setBlocks}
           currentUserId={currentUserId}
           isAdmin={isAdmin}
+          canAuthor={canAuthor}
         />
       </section>
 

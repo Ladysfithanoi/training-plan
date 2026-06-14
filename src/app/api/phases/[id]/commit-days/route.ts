@@ -23,9 +23,9 @@
  *      Conflict target: (workout_day_id, phase_exercise_id).
  *
  * Uses the service-role admin client so it bypasses RLS on the new tables
- * (which may not have policies yet). The caller must still be staff
- * (requireStaff), and — because RLS is bypassed — coach→own-block ownership is
- * verified explicitly before any DB writes happen.
+ * (which may not have policies yet). The caller must still be a content author
+ * (requireContentAuthor — admin/coach, not trial), and — because RLS is
+ * bypassed — coach→own-block ownership is verified explicitly before any writes.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Request body schema:
@@ -45,7 +45,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireStaff }      from '@/lib/auth'
+import { requireContentAuthor } from '@/lib/auth'
 
 // ── Local types for the request payload ──────────────────────────────────────
 
@@ -76,7 +76,7 @@ export async function POST(
 ) {
   // ── Auth guard ────────────────────────────────────────────────────────────
   let profile
-  try { profile = await requireStaff() } catch {
+  try { profile = await requireContentAuthor() } catch {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 

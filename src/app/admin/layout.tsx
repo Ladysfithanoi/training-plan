@@ -25,8 +25,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         .select('*')
         .eq('id', user.id)
         .single()
-      if (!data || (data.role !== 'admin' && data.role !== 'coach')) {
+      if (!data || (data.role !== 'admin' && data.role !== 'coach' && data.role !== 'trial')) {
         router.push('/dashboard')
+        return
+      }
+      // A trial account whose window has ended is bounced by the proxy; this is
+      // a belt-and-braces client guard for the same condition.
+      if (data.role === 'trial' && data.trial_active === false) {
+        router.push('/trial-expired')
         return
       }
       setProfile(data as Profile)
