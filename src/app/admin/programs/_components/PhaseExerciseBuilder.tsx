@@ -396,9 +396,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // Tracks which item is awaiting user confirmation before being deleted.
   // Replaces window.confirm() with the brand-consistent <ConfirmModal>.
   const [pendingDelete, setPendingDelete] = useState<
-    | { kind: 'exercise'; id: string }
-    | { kind: 'day';      id: string }
-    | { kind: 'phase';    id: string }
+    | { kind: 'exercise';     id: string }
+    | { kind: 'day';          id: string }
+    | { kind: 'phase';        id: string }
+    | { kind: 'dayExercises'; id: string }   // wipe every exercise in a day (day stays)
+    | { kind: 'orphans' }                    // wipe every "chưa thuộc ngày nào" exercise
     | null
   >(null)
 
@@ -910,11 +912,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setPendingDelete({ kind: 'day', id: dayId })
   }
 
-  function doDeleteDay(dayId: string) {
+  async function doDeleteDay(dayId: string) {
     if (!splitType) return
+    // Xoá luôn các bài tập đã gán cho ngày này. Nếu không, day_id của chúng sẽ
+    // trỏ tới một ngày vừa bị xoá → biến thành "mồ côi" và hiện lại sau khi tải.
+    const ids = phaseExercises.filter(pe => pe.day_id === dayId).map(pe => pe.id)
     const updated = splitDays.filter(d => d.id !== dayId)
     setSplitDays(updated)
     if (activeDayId === dayId) setActiveDayId(updated[0]?.id ?? null)
+    await deletePhaseExercises(ids)
   }
 
   // ── Reorder training days (← / →) ────────────────────────────────────────────
@@ -1002,6 +1008,22 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     if (res.ok) {
       setPhaseExercises(prev => prev.filter(pe => pe.id !== phaseExerciseId))
     }
+  }
+
+  /**
+   * Hard-delete a batch of phase_exercise rows from both the DB and local state.
+   * Shared by the orphan cleanup, the per-day "wipe all" action and the
+   * day-deletion cascade. No-op on an empty list.
+   */
+  async function deletePhaseExercises(ids: string[]) {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    setPhaseExercises(prev => prev.filter(pe => !idSet.has(pe.id)))
+    await Promise.all(ids.map(id =>
+      fetch(`/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${id}`, {
+        method: 'DELETE',
+      }),
+    ))
   }
 
   // ── Edit exercise ──────────────────────────────────────────────────────────────
@@ -1255,9 +1277,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     const snapshot = pendingDelete       // capture before clearing
     setPendingDelete(null)               // close modal immediately
     if (snapshot.kind === 'day') {
-      doDeleteDay(snapshot.id)
+      await doDeleteDay(snapshot.id)
     } else if (snapshot.kind === 'phase') {
       await doDeletePhase(snapshot.id)
+    } else if (snapshot.kind === 'orphans') {
+      await deletePhaseExercises(orphanExercises.map(e => e.id))
+    } else if (snapshot.kind === 'dayExercises') {
+      await deletePhaseExercises(
+        phaseExercises.filter(pe => pe.day_id === snapshot.id).map(pe => pe.id),
+      )
     } else {
       await doRemoveExercise(snapshot.id)
     }
@@ -2108,9 +2136,20 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                       : '')})
               </span>
             </h3>
-            <Button size="sm" onClick={() => setAddOpen(v => !v)}>
-              {addOpen ? '✕ Đóng' : '+ Thêm bài tập'}
-            </Button>
+            <div className="flex items-center gap-2">
+              {splitType && activeDay && visibleExercises.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete({ kind: 'dayExercises', id: activeDayId! })}
+                  className="text-xs font-semibold text-danger/70 hover:text-danger px-2.5 py-1.5 rounded-lg hover:bg-danger/8 transition-colors"
+                >
+                  Xoá tất cả bài tập
+                </button>
+              )}
+              <Button size="sm" onClick={() => setAddOpen(v => !v)}>
+                {addOpen ? '✕ Đóng' : '+ Thêm bài tập'}
+              </Button>
+            </div>
           </div>
 
           {/* Preview hint — assignments are pinned, so saved-config exercises are
@@ -2275,7 +2314,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                     ⚠ {orphanExercises.length} bài tập chưa thuộc ngày nào
                   </p>
                   <p className="text-xs text-ink/55 mt-0.5">
-                    Chọn bài tập rồi chọn ngày để chuyển vào — hoặc chuyển tất cả vào ngày đang xem.
+                    Chọn bài tập rồi chọn ngày để chuyển vào — hoặc chuyển tất cả vào ngày đang xem, hoặc xoá hẳn khỏi giáo án.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -2296,6 +2335,14 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                       Chuyển tất cả vào “{activeDay.label}”
                     </Button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete({ kind: 'orphans' })}
+                    disabled={assigningOrphans}
+                    className="text-xs font-semibold text-danger/70 hover:text-danger px-2 py-1 rounded hover:bg-danger/8 transition-colors disabled:opacity-40"
+                  >
+                    Xoá tất cả
+                  </button>
                 </div>
               </div>
 
@@ -3170,16 +3217,31 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       <ConfirmModal
         open={pendingDelete !== null}
         title={
-          pendingDelete?.kind === 'phase'    ? 'Xoá giai đoạn' :
-          pendingDelete?.kind === 'day'      ? 'Xoá ngày tập'  : 'Xoá bài tập'
+          pendingDelete?.kind === 'phase'        ? 'Xoá giai đoạn' :
+          pendingDelete?.kind === 'day'          ? 'Xoá ngày tập'  :
+          pendingDelete?.kind === 'dayExercises' ? 'Xoá tất cả bài tập trong ngày' :
+          pendingDelete?.kind === 'orphans'      ? 'Xoá tất cả bài tập chưa thuộc ngày' :
+          'Xoá bài tập'
         }
-        description={
-          pendingDelete?.kind === 'phase'
-            ? 'Xoá giai đoạn này và tất cả bài tập bên trong? Hành động này không thể hoàn tác.'
-            : pendingDelete?.kind === 'day'
-              ? 'Xoá slot ngày này khỏi cấu hình chia tách? Bài tập đã gán cho ngày này sẽ không bị xoá khỏi giai đoạn.'
-              : 'Bạn có chắc chắn muốn xoá bài tập này khỏi giai đoạn? Hành động này không thể hoàn tác.'
-        }
+        description={(() => {
+          if (pendingDelete?.kind === 'phase') {
+            return 'Xoá giai đoạn này và tất cả bài tập bên trong? Hành động này không thể hoàn tác.'
+          }
+          if (pendingDelete?.kind === 'day') {
+            const n = phaseExercises.filter(pe => pe.day_id === pendingDelete.id).length
+            return n > 0
+              ? `Xoá ngày này khỏi cấu hình và xoá luôn ${n} bài tập đã gán cho ngày? Hành động này không thể hoàn tác.`
+              : 'Xoá slot ngày này khỏi cấu hình chia tách? Hành động này không thể hoàn tác.'
+          }
+          if (pendingDelete?.kind === 'dayExercises') {
+            const n = phaseExercises.filter(pe => pe.day_id === pendingDelete.id).length
+            return `Xoá toàn bộ ${n} bài tập trong ngày này (ngày vẫn được giữ lại)? Hành động này không thể hoàn tác.`
+          }
+          if (pendingDelete?.kind === 'orphans') {
+            return `Xoá toàn bộ ${orphanExercises.length} bài tập chưa thuộc ngày nào khỏi giai đoạn? Hành động này không thể hoàn tác.`
+          }
+          return 'Bạn có chắc chắn muốn xoá bài tập này khỏi giai đoạn? Hành động này không thể hoàn tác.'
+        })()}
         confirmLabel="Xoá"
         onConfirm={() => void executePendingDelete()}
         onCancel={() => setPendingDelete(null)}
