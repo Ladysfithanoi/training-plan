@@ -399,8 +399,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     | { kind: 'exercise';     id: string }
     | { kind: 'day';          id: string }
     | { kind: 'phase';        id: string }
-    | { kind: 'dayExercises'; id: string }   // wipe every exercise in a day (day stays)
-    | { kind: 'orphans' }                    // wipe every "chưa thuộc ngày nào" exercise
+    | { kind: 'dayExercises'; id: string }    // wipe every exercise in a day (day stays)
+    | { kind: 'orphans'; ids: string[] }      // delete the ticked "chưa thuộc ngày nào" exercises
     | null
   >(null)
 
@@ -1281,7 +1281,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     } else if (snapshot.kind === 'phase') {
       await doDeletePhase(snapshot.id)
     } else if (snapshot.kind === 'orphans') {
-      await deletePhaseExercises(orphanExercises.map(e => e.id))
+      setSelectedOrphanIds(new Set())
+      await deletePhaseExercises(snapshot.ids)
     } else if (snapshot.kind === 'dayExercises') {
       await deletePhaseExercises(
         phaseExercises.filter(pe => pe.day_id === snapshot.id).map(pe => pe.id),
@@ -2314,7 +2315,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                     ⚠ {orphanExercises.length} bài tập chưa thuộc ngày nào
                   </p>
                   <p className="text-xs text-ink/55 mt-0.5">
-                    Chọn bài tập rồi chọn ngày để chuyển vào — hoặc chuyển tất cả vào ngày đang xem, hoặc xoá hẳn khỏi giáo án.
+                    Tích chọn bài tập rồi chuyển vào một ngày — hoặc xoá hẳn khỏi giáo án. “Chọn tất cả” để thao tác với toàn bộ.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -2335,14 +2336,6 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                       Chuyển tất cả vào “{activeDay.label}”
                     </Button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setPendingDelete({ kind: 'orphans' })}
-                    disabled={assigningOrphans}
-                    className="text-xs font-semibold text-danger/70 hover:text-danger px-2 py-1 rounded hover:bg-danger/8 transition-colors disabled:opacity-40"
-                  >
-                    Xoá tất cả
-                  </button>
                 </div>
               </div>
 
@@ -2402,6 +2395,17 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                   >
                     {assigningOrphans ? 'Đang chuyển…' : `Chuyển vào “${targetDay?.label ?? '—'}”`}
                   </Button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete({
+                      kind: 'orphans',
+                      ids:  orphanExercises.filter(e => selectedOrphanIds.has(e.id)).map(e => e.id),
+                    })}
+                    disabled={assigningOrphans}
+                    className="text-xs font-semibold text-danger/70 hover:text-danger px-2.5 py-1.5 rounded-lg hover:bg-danger/8 transition-colors disabled:opacity-40"
+                  >
+                    Xoá {selectedCount} bài đã chọn
+                  </button>
                 </div>
               )}
             </div>
@@ -3220,7 +3224,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           pendingDelete?.kind === 'phase'        ? 'Xoá giai đoạn' :
           pendingDelete?.kind === 'day'          ? 'Xoá ngày tập'  :
           pendingDelete?.kind === 'dayExercises' ? 'Xoá tất cả bài tập trong ngày' :
-          pendingDelete?.kind === 'orphans'      ? 'Xoá tất cả bài tập chưa thuộc ngày' :
+          pendingDelete?.kind === 'orphans'      ? 'Xoá bài tập đã chọn' :
           'Xoá bài tập'
         }
         description={(() => {
@@ -3238,7 +3242,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
             return `Xoá toàn bộ ${n} bài tập trong ngày này (ngày vẫn được giữ lại)? Hành động này không thể hoàn tác.`
           }
           if (pendingDelete?.kind === 'orphans') {
-            return `Xoá toàn bộ ${orphanExercises.length} bài tập chưa thuộc ngày nào khỏi giai đoạn? Hành động này không thể hoàn tác.`
+            return `Xoá ${pendingDelete.ids.length} bài tập đã chọn khỏi giai đoạn? Hành động này không thể hoàn tác.`
           }
           return 'Bạn có chắc chắn muốn xoá bài tập này khỏi giai đoạn? Hành động này không thể hoàn tác.'
         })()}
