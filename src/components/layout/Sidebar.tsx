@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import type { Profile } from '@/types'
 import { Logo } from './Logo'
 import { TrialCountdown } from './TrialCountdown'
+import { AccountModal } from './AccountModal'
 
 interface NavItem {
   href:      string
@@ -103,6 +104,8 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
   // Mobile drawer: hidden by default to give the page full width; the user opens
   // it from the floating button and it closes on navigation / backdrop / Esc.
   const [open, setOpen] = useState(false)
+  // Account info + change-password modal (every role except trial).
+  const [accountOpen, setAccountOpen] = useState(false)
 
   // Close the drawer whenever the route changes (a nav link was tapped).
   useEffect(() => { setOpen(false) }, [pathname])
@@ -243,19 +246,41 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
         {/* Trial (Trải nghiệm) countdown — only for trial accounts */}
         {isTrial && <TrialCountdown expiresAt={profile.trial_expires_at} />}
 
-        <div className="flex items-center gap-2.5 mb-2.5">
-          <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink shrink-0">
-            {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
+        {isTrial ? (
+          <div className="flex items-center gap-2.5 mb-2.5">
+            <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink shrink-0">
+              {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink truncate leading-tight">
+                {profile.full_name ?? profile.email}
+              </p>
+              <p className="text-[11px] text-ink/40 capitalize">{roleLabel}</p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-ink truncate leading-tight">
-              {profile.full_name ?? profile.email}
-            </p>
-            <p className="text-[11px] text-ink/40 capitalize">
-              {roleLabel}
-            </p>
-          </div>
-        </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAccountOpen(true)}
+            title="Thông tin tài khoản & đổi mật khẩu"
+            className="w-full flex items-center gap-2.5 mb-2.5 rounded-lg p-1.5 -m-1.5 text-left hover:bg-ink/6 transition-colors group"
+          >
+            <div className="h-8 w-8 rounded-full bg-ink/10 flex items-center justify-center text-xs font-bold text-ink shrink-0">
+              {profile.full_name?.[0]?.toUpperCase() ?? profile.email[0].toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-ink truncate leading-tight">
+                {profile.full_name ?? profile.email}
+              </p>
+              <p className="text-[11px] text-ink/40 capitalize">{roleLabel}</p>
+            </div>
+            <svg className="h-4 w-4 shrink-0 text-ink/30 group-hover:text-ink/60 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+        )}
 
         <button
           onClick={onLogout}
@@ -271,6 +296,11 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
       </div>
 
     </aside>
+
+    {/* Account info + change password (hidden for trial accounts) */}
+    {!isTrial && (
+      <AccountModal profile={profile} open={accountOpen} onClose={() => setAccountOpen(false)} />
+    )}
     </>
   )
 }
