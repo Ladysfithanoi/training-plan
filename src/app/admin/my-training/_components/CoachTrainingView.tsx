@@ -212,6 +212,22 @@ export function CoachTrainingView({
     setActiveDayId(phaseSplitDays[0]?.id ?? null)
   }
 
+  // Re-seed week/day when the active phase changes. Needed because this component
+  // instance survives the selector→program transition (start / "Đổi"): the
+  // useState initialisers above ran while phaseSplitDays was still empty, leaving
+  // activeDayId = null. Without this, the matrix isn't scoped to a single day and
+  // dumps every exercise of the phase into one flat list until the user clicks a
+  // week tab. Keying on current_phase_id re-seeds it to the first day immediately.
+  const seededPhaseRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    const phaseId = userProgram?.current_phase_id ?? null
+    if (seededPhaseRef.current === phaseId) return
+    seededPhaseRef.current = phaseId
+    setActiveDayId(phaseSplitDays[0]?.id ?? null)
+    setActiveWeek(Math.min(Math.max(weekInPhase, 1), Math.max(durationWeeks, 1)))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProgram?.current_phase_id])
+
   // ── Day-scope helpers ──────────────────────────────────────────────────────
   // Sessions are date-based (no day_id column). We isolate the lock state to
   // the SPECIFIC day by checking whether the session has logged sets for the
