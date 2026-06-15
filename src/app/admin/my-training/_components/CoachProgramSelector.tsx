@@ -107,6 +107,9 @@ export function CoachProgramSelector({ availableBlocks }: CoachProgramSelectorPr
         alert(payload.error ?? 'Không thể kích hoạt chương trình')
         return
       }
+      // Drop the ?switch=1 param — otherwise the page keeps forcing the selector
+      // (forceSelector stays true) and the freshly-activated program never shows.
+      router.replace('/admin/my-training')
       router.refresh()
     } catch {
       alert('Lỗi kết nối — vui lòng thử lại')
