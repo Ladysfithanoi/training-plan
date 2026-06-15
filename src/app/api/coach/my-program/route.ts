@@ -1,5 +1,5 @@
 import { requireStaff } from '@/lib/auth'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 
 /**
  * GET /api/coach/my-program
@@ -45,7 +45,12 @@ export async function POST(request: Request) {
     return Response.json({ error: 'block_id is required' }, { status: 400 })
   }
 
-  const supabase = await createClient()
+  // Use the service-role client: this writes the caller's OWN program
+  // (user_id = profile.id, verified by requireStaff above). RLS on user_programs
+  // has no self-insert policy — it only permits admins or coach→own-student rows —
+  // so a coach/trial starting their personal program would otherwise hit
+  // "new row violates row-level security policy". Ownership is enforced here.
+  const supabase = createAdminClient()
 
   // Pause any existing active program for this coach
   await supabase
