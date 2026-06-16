@@ -765,6 +765,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   async function handleWeekTypeChange(val: WeekType) {
     const newIsStrength = val === 'peaking' || val === 'taper'
     setPhaseWeekType(val)
+    // Keep the in-memory phase in sync so switching meso away and back doesn't
+    // re-read the stale page-load week_type. Same root cause as the split-config
+    // sync in handleSaveConfig.
+    updateBlocks(prev => prev.map(b =>
+      b.id === selectedBlockId
+        ? { ...b, phases: (b.phases ?? []).map(p =>
+            p.id === selectedPhaseId ? { ...p, week_type: val } : p) }
+        : b,
+    ))
 
     // Reset fields that belong exclusively to the OTHER training context so that
     // stale values from the hidden panel never sneak into handleAdd().
@@ -843,6 +852,18 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
       // Commit succeeded → this config is now the saved baseline.
       setSavedConfig({ type: splitType, days: splitDays })
+      // Sync the split config back onto the phase in localBlocks/parent. Without
+      // this the in-memory phase keeps its page-load split_type/split_days, so
+      // switching to another meso and back re-reads the stale phase → splitType
+      // resolves to null → the table dumps every exercise into one flat list.
+      updateBlocks(prev => prev.map(b =>
+        b.id === selectedBlockId
+          ? { ...b, phases: (b.phases ?? []).map(p =>
+              p.id === selectedPhaseId
+                ? { ...p, split_type: splitType, split_days: splitDays }
+                : p) }
+          : b,
+      ))
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2500)
     } catch (err) {
