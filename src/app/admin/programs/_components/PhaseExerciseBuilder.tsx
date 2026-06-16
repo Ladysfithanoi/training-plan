@@ -720,6 +720,13 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // ── Data loaders ─────────────────────────────────────────────────────────────
   async function loadPhaseExercises(phaseId: string) {
     setLoading(true)
+    // Clear the previous meso's rows up front. The phase-change effect updates
+    // splitDays/savedConfig to the NEW meso synchronously, but this fetch is
+    // async — without this reset, the old meso's exercises linger for a tick and
+    // get matched against the new meso's days. Their day_id points at the old
+    // meso's (now-absent) days, so every one is mis-flagged as an orphan → the
+    // long "chưa thuộc ngày nào" list the coach sees on switching meso.
+    setPhaseExercises([])
     const res = await fetch(`/api/phases/${phaseId}/exercises`)
     if (res.ok) {
       const data = await res.json()
