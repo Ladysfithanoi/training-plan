@@ -299,6 +299,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   })
   const [phaseExercises, setPhaseExercises]   = useState<PhaseExerciseRow[]>([])
   const [loading, setLoading]                 = useState(false)
+  // Monotonic token for the in-flight phase-exercise fetch. Each load bumps it;
+  // a response only applies if its token is still the latest. Prevents an earlier
+  // meso's slow fetch from resolving last and repainting another meso's view with
+  // the wrong (previous-meso) exercises.
+  const loadReqRef = useRef(0)
 
   // ── Split config ────────────────────────────────────────────────────────────
   const [splitType, setSplitType]     = useState<SplitType | null>(null)
@@ -719,6 +724,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
   // ── Data loaders ─────────────────────────────────────────────────────────────
   async function loadPhaseExercises(phaseId: string) {
+    const reqId = ++loadReqRef.current
     setLoading(true)
     // Clear the previous meso's rows up front. The phase-change effect updates
     // splitDays/savedConfig to the NEW meso synchronously, but this fetch is
@@ -728,8 +734,12 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     // long "chưa thuộc ngày nào" list the coach sees on switching meso.
     setPhaseExercises([])
     const res = await fetch(`/api/phases/${phaseId}/exercises`)
+    // A newer meso load started while this one was in flight — discard this
+    // (now-stale) response so it can't repaint the view with another meso's rows.
+    if (reqId !== loadReqRef.current) return
     if (res.ok) {
       const data = await res.json()
+      if (reqId !== loadReqRef.current) return
       setPhaseExercises(data.exercises ?? [])
     }
     setLoading(false)
