@@ -130,6 +130,8 @@ export function ProgramBuilder({
   const [blockName,   setBlockName]   = useState('')
   const [blockDesc,   setBlockDesc]   = useState('')
   const [preset,      setPreset]      = useState<keyof typeof PRESETS | 'custom'>('classic_3_meso')
+  /** Source block id to deep-copy from; '' = create a fresh block from a preset. */
+  const [copyFrom,    setCopyFrom]    = useState<string>('')
 
   // ── Edit block (name + description) modal ──────────────────────────────────
   const [editOpen,    setEditOpen]    = useState(false)
@@ -169,8 +171,19 @@ export function ProgramBuilder({
     setBlockName('')
     setBlockDesc('')
     setPreset('classic_3_meso')
+    setCopyFrom('')
     setCreateError(null)
     setCreateOpen(true)
+  }
+
+  /** Pick a source block to copy. Prefills the name (server adds " (n)" if it
+   *  collides) only when the name field is still empty, so a typed name wins. */
+  function handleSelectCopySource(id: string) {
+    setCopyFrom(id)
+    if (id) {
+      const src = blocks.find(b => b.id === id)
+      if (src && !blockName.trim()) setBlockName(src.name)
+    }
   }
 
   async function handleCreate() {
@@ -185,7 +198,9 @@ export function ProgramBuilder({
         body: JSON.stringify({
           name:        blockName.trim(),
           description: blockDesc.trim() || null,
-          preset:      preset !== 'custom' ? preset : null,
+          // When copying, the structure comes from the source block, not a preset.
+          preset:      copyFrom ? null : (preset !== 'custom' ? preset : null),
+          copy_from:   copyFrom || null,
         }),
       })
 
@@ -206,6 +221,7 @@ export function ProgramBuilder({
       setCreateOpen(false)
       setBlockName('')
       setBlockDesc('')
+      setCopyFrom('')
       setCreateError(null)
       router.refresh()
     } catch (err) {
@@ -642,6 +658,38 @@ export function ProgramBuilder({
         size="lg"
       >
         <div className="space-y-5">
+          {/* Copy-from-existing selector */}
+          {blocks.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                Sao chép từ khối có sẵn (tuỳ chọn)
+              </label>
+              <div className="relative">
+                <select
+                  value={copyFrom}
+                  onChange={e => handleSelectCopySource(e.target.value)}
+                  className="w-full appearance-none rounded-lg border border-ink/15 pl-3 pr-9 py-2.5 text-sm text-ink bg-white focus:border-amber focus:ring-1 focus:ring-amber outline-none cursor-pointer"
+                >
+                  <option value="">— Không, tạo khối mới —</option>
+                  {sortBlocks(blocks, 'date_desc').map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              {copyFrom && (
+                <p className="text-xs text-ink/50">
+                  Toàn bộ giai đoạn, bài tập và cấu hình ngày tập sẽ được sao chép.
+                  Nếu trùng tên, hệ thống tự thêm số thứ tự để phân biệt.
+                </p>
+              )}
+            </div>
+          )}
+
           <Input
             label="Tên khối tập"
             value={blockName}
@@ -662,7 +710,8 @@ export function ProgramBuilder({
             />
           </div>
 
-          {/* Preset selector */}
+          {/* Preset selector — hidden when copying (structure comes from source) */}
+          {!copyFrom && (
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">Cấu trúc giai đoạn (Preset)</p>
             {Object.entries(PRESETS).map(([key, p]) => (
@@ -724,6 +773,7 @@ export function ProgramBuilder({
               </div>
             </label>
           </div>
+          )}
 
           {createError && (
             <p className="rounded-lg bg-danger/8 border border-danger/20 px-3 py-2 text-sm text-danger">
