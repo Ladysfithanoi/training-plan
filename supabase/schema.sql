@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS exercises (
   movement_pattern_id UUID REFERENCES movement_patterns (id),
   -- Type determines which rep zones are prescribed
   type                TEXT NOT NULL DEFAULT 'compound'
-                        CHECK (type IN ('compound', 'machine', 'cable', 'bodyweight', 'dumbbell')),
+                        CHECK (type IN ('compound', 'machine', 'cable', 'bodyweight', 'dumbbell', 'resistance_band')),
   optimal_rep_min     INT  NOT NULL DEFAULT 5,
   optimal_rep_max     INT  NOT NULL DEFAULT 20,
   description         TEXT,

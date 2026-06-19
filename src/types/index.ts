@@ -29,7 +29,7 @@ export type PhaseType = 'training' | 'maintenance' | 'active_rest'
 export type WeekType = 'standard' | 'deload' | 'taper' | 'peaking'
 export type ProgramStatus = 'active' | 'completed' | 'paused'
 export type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'skipped'
-export type ExerciseType = 'compound' | 'machine' | 'cable' | 'bodyweight' | 'dumbbell'
+export type ExerciseType = 'compound' | 'machine' | 'cable' | 'bodyweight' | 'dumbbell' | 'resistance_band'
 
 // ─── Rep Range ───────────────────────────────────────────────────────────────
 export interface RepRange {

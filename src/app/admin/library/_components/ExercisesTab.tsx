@@ -26,6 +26,7 @@ const EXERCISE_TYPES = [
   { value: 'cable', label: 'Cáp' },
   { value: 'bodyweight', label: 'Trọng lượng cơ thể' },
   { value: 'dumbbell', label: 'Tạ đơn' },
+  { value: 'resistance_band', label: 'Dây kháng lực' },
 ]
 
 const TYPE_BADGE: Record<string, string> = {
@@ -34,6 +35,7 @@ const TYPE_BADGE: Record<string, string> = {
   cable: 'bg-amber/10 text-amber',
   bodyweight: 'bg-ink/8 text-ink/60',
   dumbbell: 'bg-ink/8 text-ink/60',
+  resistance_band: 'bg-sky-400/12 text-sky-600',
 }
 
 const TYPE_LABEL_VI: Record<string, string> = {
@@ -42,6 +44,7 @@ const TYPE_LABEL_VI: Record<string, string> = {
   cable: 'Cáp',
   bodyweight: 'Trọng lượng cơ thể',
   dumbbell: 'Tạ đơn',
+  resistance_band: 'Dây kháng lực',
 }
 
 function TypeBadge({ type }: { type: string }) {

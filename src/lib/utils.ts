@@ -81,6 +81,7 @@ export function exerciseTypeLabel(type: ExerciseType): string {
     cable: 'Cáp',
     bodyweight: 'Trọng lượng cơ thể',
     dumbbell: 'Tạ đơn',
+    resistance_band: 'Dây kháng lực',
   }[type]
 }
 
