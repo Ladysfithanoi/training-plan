@@ -46,7 +46,7 @@ export default async function BangTinPage() {
 
       {/* ── Board / empty state ────────────────────────────────────────────── */}
       {announcements.length > 0 ? (
-        <AnnouncementBoard items={announcements} />
+        <AnnouncementBoard items={announcements} markSeenOnView />
       ) : (
         <div className="rounded-2xl border-2 border-dashed border-ink/12 bg-white px-6 py-16 text-center">
           <span className="text-5xl opacity-20" role="img" aria-label="Bảng tin trống">📣</span>

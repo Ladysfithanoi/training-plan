@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { ANNOUNCEMENT_SEEN_KEY } from '@/lib/announcements'
 import type { Profile } from '@/types'
 import { Logo } from './Logo'
 import { TrialCountdown } from './TrialCountdown'
@@ -146,6 +147,33 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
     : isTrial ? 'Trải nghiệm'
     : 'Học viên'
 
+  // ── "Có tin mới" dot on the Bảng tin item ───────────────────────────────────
+  const [hasNewAnnouncement, setHasNewAnnouncement] = useState(false)
+
+  // Viewing /bang-tin marks everything seen → clear the dot immediately.
+  useEffect(() => {
+    function onSeen() { setHasNewAnnouncement(false) }
+    window.addEventListener('announcements:seen', onSeen)
+    return () => window.removeEventListener('announcements:seen', onSeen)
+  }, [])
+
+  // On load (staff only), flag the dot when the newest announcement is newer
+  // than what this browser last viewed.
+  useEffect(() => {
+    if (!isStaff) return
+    let cancelled = false
+    fetch('/api/announcements/latest')
+      .then(r => (r.ok ? r.json() : { latest: null }))
+      .then(({ latest }: { latest: string | null }) => {
+        if (cancelled || !latest) return
+        const seen = localStorage.getItem(ANNOUNCEMENT_SEEN_KEY)
+        const isNew = !seen || new Date(latest).getTime() > new Date(seen).getTime()
+        if (!cancelled) setHasNewAnnouncement(isNew)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isStaff])
+
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
     if (href === '/admin')     return pathname === '/admin'
@@ -227,6 +255,15 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
             >
               {item.icon}
               <span className="truncate">{item.label}</span>
+              {item.href === '/bang-tin' && hasNewAnnouncement && (
+                <span
+                  title="Có tin mới"
+                  className={cn(
+                    'ml-auto h-2 w-2 shrink-0 rounded-full',
+                    isActive(item.href) ? 'bg-paper' : 'bg-danger',
+                  )}
+                />
+              )}
             </Link>
           ))}
 
