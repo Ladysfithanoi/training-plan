@@ -172,7 +172,8 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [isStaff])
+  // Re-check on navigation so a freshly posted tin lights the dot promptly.
+  }, [isStaff, pathname])
 
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
@@ -253,16 +254,20 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
                     : 'text-ink/50 hover:text-ink hover:bg-ink/6',
               )}
             >
-              {item.icon}
+              <span className="relative shrink-0">
+                {item.icon}
+                {item.href === '/bang-tin' && hasNewAnnouncement && (
+                  <span title="Có tin mới" className="absolute -right-1 -top-1 flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger/60" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-white" />
+                  </span>
+                )}
+              </span>
               <span className="truncate">{item.label}</span>
               {item.href === '/bang-tin' && hasNewAnnouncement && (
-                <span
-                  title="Có tin mới"
-                  className={cn(
-                    'ml-auto h-2 w-2 shrink-0 rounded-full',
-                    isActive(item.href) ? 'bg-paper' : 'bg-danger',
-                  )}
-                />
+                <span className="ml-auto rounded-full bg-danger/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">
+                  Mới
+                </span>
               )}
             </Link>
           ))}
