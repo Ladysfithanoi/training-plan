@@ -6,7 +6,8 @@ import { Modal } from '@/components/ui/Modal'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { Input } from '@/components/ui/Input'
 import { formatDate } from '@/lib/utils'
-import { ANNOUNCEMENT_MAX_ITEMS } from '@/lib/announcements'
+import { ANNOUNCEMENT_MAX_ITEMS, ANNOUNCEMENT_MAX_VISIBLE } from '@/lib/announcements'
+import { AnnouncementBoard } from '@/components/announcements/AnnouncementBoard'
 import type { Announcement } from '@/types'
 
 const PAGE_SIZE = 3
@@ -73,6 +74,8 @@ export function AnnouncementsManager({ initialItems }: { initialItems: Announcem
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const atCapacity = items.length >= ANNOUNCEMENT_MAX_ITEMS
+  // Live preview — the 3 newest, exactly what HLV see on the guide board.
+  const previewItems = items.slice(0, ANNOUNCEMENT_MAX_VISIBLE)
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
@@ -161,6 +164,27 @@ export function AnnouncementsManager({ initialItems }: { initialItems: Announcem
 
   return (
     <>
+      {/* ── Live preview — đúng như HLV nhìn thấy ở "Hướng dẫn sử dụng" ─────── */}
+      <div className="rounded-2xl border border-dashed border-amber/30 bg-amber/[0.03] p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-amber/80">
+            Xem trước
+          </p>
+          <p className="text-[11px] text-ink/40">
+            Đúng như HLV thấy ở “Hướng dẫn sử dụng” · {ANNOUNCEMENT_MAX_VISIBLE} tin mới nhất
+          </p>
+        </div>
+        {previewItems.length > 0 ? (
+          <AnnouncementBoard items={previewItems} />
+        ) : (
+          <div className="rounded-xl border border-ink/10 bg-white py-8 text-center">
+            <p className="text-sm text-ink/40">
+              Chưa có tin nào để hiển thị. Đăng tin đầu tiên để xem trước Bảng tin.
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-ink/50">
