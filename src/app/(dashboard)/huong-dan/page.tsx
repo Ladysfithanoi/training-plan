@@ -1,9 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { GLOSSARY } from '@/lib/glossary'
-import { listAnnouncements } from '@/lib/announcements.server'
-import { ANNOUNCEMENT_MAX_VISIBLE } from '@/lib/announcements'
-import { AnnouncementBoard } from '@/components/announcements/AnnouncementBoard'
 
 export const metadata = { title: 'Hướng dẫn sử dụng' }
 export const dynamic = 'force-dynamic'
@@ -117,14 +114,8 @@ export default async function GuidePage() {
   const isCoach = profile?.role === 'coach' || profile?.role === 'trial'
   const steps = isStaff ? COACH_STEPS : STUDENT_STEPS
 
-  // Bảng tin — only staff (HLV) need feature/program updates. Fetched live
-  // (force-dynamic) and self-purging at 48h via listAnnouncements.
-  const announcements = isStaff ? await listAnnouncements(ANNOUNCEMENT_MAX_VISIBLE) : []
-
   return (
     <div className="space-y-8">
-      <AnnouncementBoard items={announcements} />
-
       <div>
         <p className="text-xs font-semibold uppercase tracking-widest text-amber mb-1">
           {isStaff ? (isCoach ? 'Huấn luyện viên' : 'Quản trị viên / HLV') : 'Học viên'}
