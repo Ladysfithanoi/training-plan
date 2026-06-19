@@ -52,7 +52,10 @@ export default async function AthleteDetailPage({
       .from('phase_exercises')
       .select('*, exercise:exercises(*)')
       .eq('phase_id', userProgram.current_phase_id)
-    phaseExercises = (data ?? []) as PhaseExercise[]
+    // Per-week (migration 011): show the BASE program here; week-specific
+    // override rows are excluded from this coaching overview.
+    phaseExercises = ((data ?? []) as PhaseExercise[])
+      .filter(pe => (pe.week_number ?? null) === null)
   }
 
   // ── Recent sessions with all logged sets ──────────────────────────────────

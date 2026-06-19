@@ -2,8 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { requireContentAuthor } from '@/lib/auth'
 
 // Columns added by later migrations — may not exist on the live DB yet.
-// 006: is_amrap, target_percentage_1rm   ·   008: sort_order
-const OPTIONAL_COLUMNS = ['is_amrap', 'target_percentage_1rm', 'sort_order'] as const
+// 006: is_amrap, target_percentage_1rm · 008: sort_order · 011: week_number
+const OPTIONAL_COLUMNS = ['is_amrap', 'target_percentage_1rm', 'sort_order', 'week_number'] as const
 
 /** True when an error is PostgREST/Postgres reporting a missing column. */
 function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -86,10 +86,12 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
     }
   }
 
-  // Optional columns (migration 006 + 008) — may not be deployed.
+  // Optional columns (migration 006 + 008 + 011) — may not be deployed.
   const optional = {
     is_amrap:              body.is_amrap              ?? false,
     target_percentage_1rm: body.target_percentage_1rm ?? null,
+    // null = base row (applies to all weeks); 1..N = override for that week.
+    week_number:           body.week_number           ?? null,
     ...(nextSortOrder !== undefined ? { sort_order: nextSortOrder } : {}),
   }
 

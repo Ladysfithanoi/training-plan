@@ -45,6 +45,9 @@ export async function POST(
           .select('target_rep_min, target_rep_max, rir_target')
           .eq('phase_id', session.phase_id)
           .eq('exercise_id', body.exercise_id)
+          // Per-week (migration 011): base + override rows may both match — cap
+          // to one so maybeSingle never throws on a customised week.
+          .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
   ])

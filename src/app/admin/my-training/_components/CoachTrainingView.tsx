@@ -8,6 +8,7 @@ import type {
   SessionSurvey, SurveyPerformance, SurveyRirFeel, SurveyRecovery, WorkoutSet,
 } from '@/types'
 import { buildGuestSuggestion } from '@/lib/autoregulation'
+import { resolveWeekExercises } from '@/lib/phaseWeeks'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
 import { extractSuggestionFromNotes, extractSurveyFromNotes, stripMetaLines, encodeNotesWithMeta } from '@/lib/sessionNotes'
 import { ExerciseMatrix } from '@/components/training/ExerciseMatrix'
@@ -232,11 +233,14 @@ export function CoachTrainingView({
   // Sessions are date-based (no day_id column). We isolate the lock state to
   // the SPECIFIC day by checking whether the session has logged sets for the
   // exercises that belong to the currently active day tab.
+  // Resolve the CURRENT week's prescription (migration 011) for initial hydration —
+  // today's logged session belongs to weekInPhase, so scope to that week's rows.
+  const _currentWeekRows = resolveWeekExercises(phaseExercises, weekInPhase)
   const _defaultDayId    = phaseSplitDays[0]?.id ?? null
   const _defaultDayExIds = new Set(
     (phaseSplitDays.length > 0 && _defaultDayId
-      ? phaseExercises.filter(pe => pe.day_id === _defaultDayId)
-      : phaseExercises
+      ? _currentWeekRows.filter(pe => pe.day_id === _defaultDayId)
+      : _currentWeekRows
     ).map(pe => pe.exercise_id),
   )
   // True only when the server-prefetched completed session has sets for the
@@ -509,10 +513,11 @@ export function CoachTrainingView({
         // ONLY lock if the completed session contains sets for the exercises
         // that belong to the currently active day tab. Different days = different
         // workouts. An unrelated day must never inherit a lock from another day.
+        const weekRows = resolveWeekExercises(phaseExercises, activeWeek)
         const activeDayExIds = new Set(
           (hasSplit && activeDayId
-            ? phaseExercises.filter(pe => pe.day_id === activeDayId)
-            : phaseExercises
+            ? weekRows.filter(pe => pe.day_id === activeDayId)
+            : weekRows
           ).map(pe => pe.exercise_id),
         )
         const daySets = allSets.filter(s => activeDayExIds.has(s.exercise_id))
@@ -778,9 +783,12 @@ export function CoachTrainingView({
   const isPeaking          = phaseWeekType === 'peaking' || phaseWeekType === 'taper'
   const currentWeekIsDeload = isDeloadWeek(activeWeek)
 
+  // Per-week resolution (migration 011): the active week's effective prescription,
+  // falling back to the base program when that week isn't customised.
+  const weekExercises = resolveWeekExercises(phaseExercises, activeWeek)
   const dayExercises = hasSplit && activeDayId
-    ? phaseExercises.filter(pe => pe.day_id === activeDayId)
-    : phaseExercises
+    ? weekExercises.filter(pe => pe.day_id === activeDayId)
+    : weekExercises
   const sortedRows = sortByOrderLabel(dayExercises)
 
   const hasAnyData = Object.values(grid).some(c => c.kg || c.reps) || activeSets.length > 0
@@ -1127,7 +1135,7 @@ export function CoachTrainingView({
             <p className="text-[10px] font-bold uppercase tracking-widest text-ink/35 mb-2 px-0.5">Thanh chọn Buổi</p>
             <div className="flex flex-wrap gap-2">
               {phaseSplitDays.map(day => {
-                const count    = phaseExercises.filter(pe => pe.day_id === day.id).length
+                const count    = weekExercises.filter(pe => pe.day_id === day.id).length
                 const isActive = activeDayId === day.id
                 return (
                   <button key={day.id} type="button" onClick={() => setActiveDayId(day.id)}

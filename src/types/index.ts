@@ -198,6 +198,15 @@ export interface PhaseExercise {
    */
   target_percentage_1rm: number | null
 
+  // ── Per-week prescription (migration 011) ─────────────────────────────────────
+  /**
+   * Which week of the meso this row applies to.
+   *   null  → BASE row: applies to every week without a week-specific override.
+   *   1..N  → OVERRIDE row: applies only to that week.
+   * See resolveWeekExercises() for the read-side fallback logic.
+   */
+  week_number?: number | null
+
   exercise?: Exercise
 }
 

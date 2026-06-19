@@ -299,6 +299,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   })
   const [phaseExercises, setPhaseExercises]   = useState<PhaseExerciseRow[]>([])
   const [loading, setLoading]                 = useState(false)
+  // ── Per-week scope (migration 011) ───────────────────────────────────────────
+  // null = "Gốc" (base rows, apply to every week); 1..N = editing that week only.
+  const [selectedWeek, setSelectedWeek]       = useState<number | null>(null)
+  const [weekBusy, setWeekBusy]               = useState(false)
+  const [pendingWeekReset, setPendingWeekReset] = useState<number | null>(null)
   // Monotonic token for the in-flight phase-exercise fetch. Each load bumps it;
   // a response only applies if its token is still the latest. Prevents an earlier
   // meso's slow fetch from resolving last and repainting another meso's view with
@@ -462,6 +467,21 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const activeDay     = splitDays.find(d => d.id === activeDayId) ?? null
   const recommended   = selectedPhase ? recommendSplit(selectedPhase.frequency_per_week) : null
 
+  // ── Per-week scope (migration 011) ───────────────────────────────────────────
+  // The builder edits one "week scope" at a time: selectedWeek === null → the
+  // base rows (apply to all weeks); 1..N → that week's override rows. Every
+  // display/volume/orphan computation below derives from `scopedExercises`, and
+  // writes are tagged with `week_number: selectedWeek`.
+  const durationWeeks = selectedPhase?.duration_weeks ?? 0
+  const weekNumbers   = Array.from({ length: durationWeeks }, (_, i) => i + 1)
+  /** True when the phase has ≥1 override row for that week. */
+  const weekIsCustomized = (w: number) => phaseExercises.some(pe => (pe.week_number ?? null) === w)
+  const scopedExercises = phaseExercises.filter(pe => (pe.week_number ?? null) === selectedWeek)
+  /** A week tab is selected but it still inherits the base (no overrides yet). */
+  const viewingUncustomizedWeek = selectedWeek !== null && !weekIsCustomized(selectedWeek)
+  /** Count of base rows — shown in the "đang dùng Gốc" hint. */
+  const baseExerciseCount = phaseExercises.filter(pe => (pe.week_number ?? null) === null).length
+
   // Unsaved split-config changes (type or days differ from the saved baseline).
   const configDirty = splitType !== null &&
     splitSig(splitType, splitDays) !== splitSig(savedConfig.type, savedConfig.days)
@@ -474,7 +494,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // reappear when its type is reselected. They're hidden from this preview rather
   // than dumped into the recovery panel (assignments stay pinned to their day).
   const orphanExercises: PhaseExerciseRow[] = splitType
-    ? phaseExercises.filter(pe => {
+    ? scopedExercises.filter(pe => {
         if (!pe.day_id) return true
         if (splitDays.some(d => d.id === pe.day_id)) return false
         if (savedConfig.days.some(d => d.id === pe.day_id)) return false
@@ -485,7 +505,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // Exercises pinned to the saved config but hidden because the coach is currently
   // previewing a DIFFERENT split layout. Counted only to show a reassuring hint.
   const hiddenSavedExerciseCount = (splitType && configDirty)
-    ? phaseExercises.filter(pe =>
+    ? scopedExercises.filter(pe =>
         pe.day_id != null &&
         !splitDays.some(d => d.id === pe.day_id) &&
         savedConfig.days.some(d => d.id === pe.day_id),
@@ -498,8 +518,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
    * day shows ONLY its own exercises.  Without a split → show everything.
    */
   const visibleExercises: PhaseExerciseRow[] = (splitType && activeDayId)
-    ? phaseExercises.filter(pe => pe.day_id === activeDayId)
-    : phaseExercises
+    ? scopedExercises.filter(pe => pe.day_id === activeDayId)
+    : scopedExercises
 
   /**
    * Set of day UUIDs that currently exist in the split configuration.
@@ -518,15 +538,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
    * not because of phantom unassigned rows inflating the total.
    */
   const assignedPhaseCount = splitType
-    ? phaseExercises.filter(pe => pe.day_id != null && splitDayIdSet.has(pe.day_id)).length
-    : phaseExercises.length
+    ? scopedExercises.filter(pe => pe.day_id != null && splitDayIdSet.has(pe.day_id)).length
+    : scopedExercises.length
 
   /**
    * The next auto-assigned horizontal label for the add form preview.
    * Re-uses visibleExercises.length so it stays in sync with the table.
    */
   const nextHorizontalLabel = computeHorizontalLabel(
-    (splitType && activeDayId) ? visibleExercises.length : phaseExercises.length,
+    (splitType && activeDayId) ? visibleExercises.length : scopedExercises.length,
   )
 
   // ── Weekly volume by anatomical muscle group ─────────────────────────────────
@@ -552,7 +572,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const weeklyVolumeByMuscle = (() => {
     const freqMul = splitType ? 1 : (selectedPhase?.frequency_per_week ?? 1)
     const map = new Map<string, number>()
-    for (const pe of phaseExercises) {
+    for (const pe of scopedExercises) {
       const patternName  = pe.exercise.movement_pattern?.name ?? ''
       const exerciseName = pe.exercise.name ?? ''
       const sessionSets  = (pe.target_sets ?? 0) * freqMul
@@ -566,7 +586,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       .sort((a, b) => b.sets - a.sets)
   })()
 
-  const rawWeeklySets   = phaseExercises.reduce(
+  const rawWeeklySets   = scopedExercises.reduce(
     (sum, pe) => sum + (pe.target_sets ?? 0) * (splitType ? 1 : (selectedPhase?.frequency_per_week ?? 1)),
     0,
   )
@@ -628,6 +648,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setAddingDay(false)
     setSaveStatus('idle')
     setEditingOLId(null)
+    setSelectedWeek(null)
   }, [selectedBlockId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Phase change ─────────────────────────────────────────────────────────────
@@ -669,6 +690,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setAddingDay(false)
     setSaveStatus('idle')
     setEditingOLId(null)
+    // Per-week (migration 011): start each phase on the base ("Gốc") scope.
+    setSelectedWeek(null)
     // Reset orphan-recovery & copy-day selections for the new phase context.
     setSelectedOrphanIds(new Set())
     setOrphanTargetDayId(null)
@@ -846,12 +869,16 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           split_days: splitDaysPayload,
           // Send only the fields the endpoint needs — avoids shipping large
           // exercise / movement-pattern join objects over the wire.
-          phase_exercises: phaseExercises.map(pe => ({
-            id:            pe.id,
-            day_id:        pe.day_id        ?? null,
-            order_label:   pe.order_label   ?? null,
-            loading_style: pe.loading_style ?? 'horizontal',
-          })),
+          // Per-week (migration 011): day_exercises mirrors the BASE day structure,
+          // so only base rows are committed; week overrides share the same days.
+          phase_exercises: phaseExercises
+            .filter(pe => (pe.week_number ?? null) === null)
+            .map(pe => ({
+              id:            pe.id,
+              day_id:        pe.day_id        ?? null,
+              order_label:   pe.order_label   ?? null,
+              loading_style: pe.loading_style ?? 'horizontal',
+            })),
         }),
       })
 
@@ -977,6 +1004,12 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // ── Exercise CRUD ─────────────────────────────────────────────────────────────
   async function handleAdd() {
     if (!selectedExercise || !selectedPhaseId) return
+    // Guard: a week that still inherits the base must be customised first, so we
+    // never create a partial override set (which would hide the rest of the base).
+    if (viewingUncustomizedWeek) {
+      setAddError('Hãy bấm “Tùy chỉnh tuần này” trước khi thêm bài cho tuần.')
+      return
+    }
     setAdding(true)
     setAddError(null)
 
@@ -997,6 +1030,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         day_id:        effectiveDayId,
         order_label:   effectiveLabel,
         loading_style: loadingStyle,
+        // Per-week scope (migration 011): null = base, 1..N = that week.
+        week_number:   selectedWeek,
 
         // ── Context-aware periodisation fields (migration 006) ──────────────
         // Strength / Peaking context → prescribe by %1RM; RIR and AMRAP suppressed
@@ -1322,8 +1357,10 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       setSelectedOrphanIds(new Set())
       await deletePhaseExercises(snapshot.ids)
     } else if (snapshot.kind === 'dayExercises') {
+      // Scope the wipe to the week currently being edited (base or an override
+      // week) so clearing a day on one week never touches the others.
       await deletePhaseExercises(
-        phaseExercises.filter(pe => pe.day_id === snapshot.id).map(pe => pe.id),
+        scopedExercises.filter(pe => pe.day_id === snapshot.id).map(pe => pe.id),
       )
     } else {
       await doRemoveExercise(snapshot.id)
@@ -1501,6 +1538,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           is_amrap:              pe.is_amrap,
           target_percentage_1rm: pe.target_percentage_1rm,
           notes:                 pe.notes,
+          // Land copies in the current week scope (migration 011).
+          week_number:           selectedWeek,
         }),
       })
       if (res.ok) {
@@ -1514,7 +1553,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // Similar sessions (e.g. two "Push" days) can be cloned in one click.
   async function copyDayExercises() {
     if (!activeDayId || !copySourceDayId || copySourceDayId === activeDayId) return
-    const source = phaseExercises.filter(pe => pe.day_id === copySourceDayId)
+    const source = scopedExercises.filter(pe => pe.day_id === copySourceDayId)
     if (source.length === 0) return
 
     setCopyingDay(true)
@@ -1556,7 +1595,10 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
     // Clone each source day's exercises into its freshly-created day.
     for (const { newId, sourceDayId } of created) {
-      const source = crossPhaseExercises.filter(pe => pe.day_id === sourceDayId)
+      // Copy the source meso's BASE rows (week_number null) for that day.
+      const source = crossPhaseExercises.filter(
+        pe => pe.day_id === sourceDayId && (pe.week_number ?? null) === null,
+      )
       await copyExercisesIntoDay(source, newId)
     }
 
@@ -1566,6 +1608,37 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setSelectedCrossDayIds(new Set())
     setCrossPhaseExercises([])
     setCopyingCross(false)
+  }
+
+  // ── Per-week customise / reset (migration 011) ───────────────────────────────
+  // Customise = clone the base rows into week-N rows (server side), then refresh.
+  // Reset = delete the week-N rows so the week falls back to the base program.
+  async function customizeWeek(week: number) {
+    if (!selectedPhaseId) return
+    setWeekBusy(true)
+    try {
+      const res = await fetch(`/api/phases/${selectedPhaseId}/weeks`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ week }),
+      })
+      const data = await res.json()
+      if (res.ok) setPhaseExercises(data.exercises ?? [])
+    } finally {
+      setWeekBusy(false)
+    }
+  }
+
+  async function resetWeek(week: number) {
+    if (!selectedPhaseId) return
+    setWeekBusy(true)
+    try {
+      const res = await fetch(`/api/phases/${selectedPhaseId}/weeks?week=${week}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (res.ok) setPhaseExercises(data.exercises ?? [])
+    } finally {
+      setWeekBusy(false)
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -1764,6 +1837,96 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               </select>
             </div>
           </div>
+
+          {/* ════════════════════════════════════════════════════════════════ */}
+          {/* ── WEEK SCOPE (migration 011) ─────────────────────────────── */}
+          {/* ════════════════════════════════════════════════════════════════ */}
+          {durationWeeks > 0 && (
+            <div className="rounded-xl border border-ink/10 bg-white px-4 py-3 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs font-semibold uppercase tracking-widest text-ink/40">
+                  Tuần tập
+                  <span className="ml-2 normal-case font-normal text-[11px] text-ink/40 tracking-normal">
+                    Set up bài / sets / reps riêng cho từng tuần
+                  </span>
+                </p>
+                {weekBusy && (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber border-t-transparent" />
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedWeek(null)}
+                  className={cn(
+                    'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all',
+                    selectedWeek === null
+                      ? 'border-ink bg-ink text-paper'
+                      : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
+                  )}
+                >
+                  Gốc
+                </button>
+                {weekNumbers.map(w => {
+                  const custom = weekIsCustomized(w)
+                  const active = selectedWeek === w
+                  return (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => setSelectedWeek(w)}
+                      className={cn(
+                        'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all inline-flex items-center gap-1.5',
+                        active
+                          ? 'border-amber bg-amber/10 text-amber'
+                          : custom
+                            ? 'border-amber/40 text-amber/80 hover:bg-amber/5'
+                            : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
+                      )}
+                    >
+                      Tuần {w}
+                      {custom && <span className="h-1.5 w-1.5 rounded-full bg-amber" />}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {selectedWeek === null ? (
+                <p className="text-[11px] text-ink/45">
+                  Đang chỉnh <strong className="text-ink/70">bộ Gốc</strong> — áp dụng cho mọi tuần chưa có bản riêng.
+                </p>
+              ) : viewingUncustomizedWeek ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber/25 bg-amber/5 px-3 py-2">
+                  <span className="text-[11px] text-ink/60">
+                    Tuần {selectedWeek} đang dùng bộ Gốc ({baseExerciseCount} bài). Tạo bản riêng để set up khác đi.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={weekBusy}
+                    onClick={() => void customizeWeek(selectedWeek)}
+                    className="text-amber border-amber/40 hover:bg-amber/10"
+                  >
+                    Tùy chỉnh tuần này
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-amber/80">
+                    Tuần {selectedWeek} có bản riêng — chỉnh bên dưới không ảnh hưởng các tuần khác.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingWeekReset(selectedWeek)}
+                    className="text-[11px] font-semibold text-danger/70 hover:text-danger underline underline-offset-2"
+                  >
+                    Khôi phục về Gốc
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ════════════════════════════════════════════════════════════════ */}
           {/* ── SPLIT CONFIG SECTION ───────────────────────────────────── */}
@@ -2170,8 +2333,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                   ? (assignedPhaseCount > visibleExercises.length
                       ? ` / ${assignedPhaseCount} tổng`
                       : '')
-                  : (phaseExercises.length > visibleExercises.length
-                      ? ` / ${phaseExercises.length} tổng`
+                  : (scopedExercises.length > visibleExercises.length
+                      ? ` / ${scopedExercises.length} tổng`
                       : '')})
               </span>
             </h3>
@@ -2185,7 +2348,12 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                   Xoá tất cả bài tập
                 </button>
               )}
-              <Button size="sm" onClick={() => setAddOpen(v => !v)}>
+              <Button
+                size="sm"
+                onClick={() => setAddOpen(v => !v)}
+                disabled={viewingUncustomizedWeek}
+                title={viewingUncustomizedWeek ? 'Hãy “Tùy chỉnh tuần này” trước' : undefined}
+              >
                 {addOpen ? '✕ Đóng' : '+ Thêm bài tập'}
               </Button>
             </div>
@@ -2203,10 +2371,10 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           {/* Copy-from-another-day — clone a similar session's exercises into the
               active day in one click. Only days that actually have exercises are
               offered as a source. */}
-          {splitType && activeDay && (() => {
+          {splitType && activeDay && !viewingUncustomizedWeek && (() => {
             const sourceDays = splitDays.filter(
               d => d.id !== activeDayId &&
-                   phaseExercises.some(pe => pe.day_id === d.id),
+                   scopedExercises.some(pe => pe.day_id === d.id),
             )
             if (sourceDays.length === 0) return null
             return (
@@ -2221,7 +2389,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 >
                   <option value="">— Chọn ngày nguồn —</option>
                   {sourceDays.map(d => {
-                    const n = phaseExercises.filter(pe => pe.day_id === d.id).length
+                    const n = scopedExercises.filter(pe => pe.day_id === d.id).length
                     return (
                       <option key={d.id} value={d.id}>
                         {d.label} ({n} bài)
@@ -2246,7 +2414,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               same block. Pick a meso, tick the sessions to bring over (or all),
               then "Sao chép" creates them in THIS meso. New days are draft until
               the coach presses "Lưu cấu hình giáo án". */}
-          {splitType && (() => {
+          {splitType && !viewingUncustomizedWeek && (() => {
             const otherPhases = phases.filter(p => p.id !== selectedPhaseId)
             if (otherPhases.length === 0) return null
 
@@ -3276,7 +3444,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               : 'Xoá slot ngày này khỏi cấu hình chia tách? Hành động này không thể hoàn tác.'
           }
           if (pendingDelete?.kind === 'dayExercises') {
-            const n = phaseExercises.filter(pe => pe.day_id === pendingDelete.id).length
+            const n = scopedExercises.filter(pe => pe.day_id === pendingDelete.id).length
             return `Xoá toàn bộ ${n} bài tập trong ngày này (ngày vẫn được giữ lại)? Hành động này không thể hoàn tác.`
           }
           if (pendingDelete?.kind === 'orphans') {
@@ -3287,6 +3455,20 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         confirmLabel="Xoá"
         onConfirm={() => void executePendingDelete()}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      {/* ── Confirm: khôi phục tuần về Gốc (migration 011) ───────────────────── */}
+      <ConfirmModal
+        open={pendingWeekReset !== null}
+        title="Khôi phục tuần về Gốc"
+        description={`Xoá bản tùy chỉnh của Tuần ${pendingWeekReset ?? ''}? Tuần này sẽ quay lại dùng bộ Gốc và các chỉnh sửa riêng cho tuần sẽ mất.`}
+        confirmLabel="Khôi phục về Gốc"
+        onConfirm={() => {
+          const w = pendingWeekReset!
+          setPendingWeekReset(null)
+          void resetWeek(w)
+        }}
+        onCancel={() => setPendingWeekReset(null)}
       />
 
       {/* ── Edit phase parameters modal ──────────────────────────────────────── */}

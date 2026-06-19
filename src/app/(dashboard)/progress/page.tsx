@@ -227,10 +227,12 @@ export default async function ProgressPage() {
           .select('name, phase_order, block_id')
           .eq('id', activeProgram.current_phase_id)
           .maybeSingle(),
-        // Include exercise muscle_groups for volume adequacy computation
+        // Include exercise muscle_groups for volume adequacy computation.
+        // Select * so the optional week_number column (migration 011) comes
+        // through when present; base rows are isolated below.
         supabase
           .from('phase_exercises')
-          .select('target_sets, target_rep_min, target_rep_max, exercise:exercises(muscle_groups)')
+          .select('*, exercise:exercises(muscle_groups)')
           .eq('phase_id', activeProgram.current_phase_id),
         supabase
           .from('phases')
@@ -238,12 +240,16 @@ export default async function ProgressPage() {
           .eq('block_id', activeProgram.block_id ?? ''),
       ])
 
-      const phaseExercises: PhaseExerciseForAudit[] = (rawPhaseExercises ?? []).map((pe: any) => ({
-        target_sets: pe.target_sets,
-        target_rep_min: pe.target_rep_min,
-        target_rep_max: pe.target_rep_max,
-        exercise: pe.exercise as { muscle_groups: string[] } | null,
-      }))
+      // Per-week (migration 011): the volume audit reflects the BASE program —
+      // exclude week-specific override rows so totals aren't double-counted.
+      const phaseExercises: PhaseExerciseForAudit[] = (rawPhaseExercises ?? [])
+        .filter((pe: { week_number?: number | null }) => (pe.week_number ?? null) === null)
+        .map((pe: any) => ({
+          target_sets: pe.target_sets,
+          target_rep_min: pe.target_rep_min,
+          target_rep_max: pe.target_rep_max,
+          exercise: pe.exercise as { muscle_groups: string[] } | null,
+        }))
 
       // ── Rep zone counts ───────────────────────────────────────────────────
       const thisWeekAllSets = allSets.filter(s => thisWeekSessionIds.includes(s.session_id))
