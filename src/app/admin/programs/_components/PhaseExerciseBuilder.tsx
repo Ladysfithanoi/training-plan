@@ -395,6 +395,9 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // ── Migration 012: warmup flag ──────────────────────────────────────────────
   /** When true the exercise is marked as a warm-up ("Bài khởi động"). */
   const [isWarmup, setIsWarmup]               = useState(false)
+  // ── Coach note shown to the athlete ─────────────────────────────────────────
+  /** Free-text prescription note (phase_exercises.notes) visible to the athlete. */
+  const [exerciseNotes, setExerciseNotes]     = useState('')
 
   // ── Phase week-type (migration 006) ──────────────────────────────────────────
   /** Training stimulus character for the currently selected phase. */
@@ -433,6 +436,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [editIsAmrap, setEditIsAmrap]           = useState(false)
   const [editTarget1rmPct, setEditTarget1rmPct] = useState('')
   const [editIsWarmup, setEditIsWarmup]         = useState(false)
+  const [editNotes, setEditNotes]               = useState('')
   const [editSaving, setEditSaving]             = useState(false)
   const [editError, setEditError]               = useState<string | null>(null)
 
@@ -670,6 +674,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       setIsAmrap(false)
       setTarget1rmPct('')
       setIsWarmup(false)
+      setExerciseNotes('')
       return
     }
 
@@ -713,6 +718,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setIsAmrap(false)
     setTarget1rmPct('')
     setIsWarmup(false)
+    setExerciseNotes('')
     setTargetRepMin('1')
     setTargetRepMax(newIsStrength ? '3' : '12')
     setRirTarget(newIsStrength ? '0' : '2')
@@ -1049,6 +1055,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         target_percentage_1rm: target1rmPct ? (parseInt(target1rmPct) || null) : null,
         // migration 012 — independent warmup marker
         is_warmup:             isWarmup,
+        // Coach note shown to the athlete (phase_exercises.notes). Empty = none.
+        notes:                 exerciseNotes.trim() || null,
       }),
     })
 
@@ -1074,6 +1082,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setTarget1rmPct('')
     // Migration 012 — reset warmup flag
     setIsWarmup(false)
+    setExerciseNotes('')
   }
 
   function handleRemove(phaseExerciseId: string) {
@@ -1122,6 +1131,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setEditIsAmrap(pe.is_amrap ?? false)
     setEditTarget1rmPct(pe.target_percentage_1rm != null ? String(pe.target_percentage_1rm) : '')
     setEditIsWarmup(pe.is_warmup ?? false)
+    setEditNotes(pe.notes ?? '')
     setEditError(null)
   }
 
@@ -1153,6 +1163,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           target_percentage_1rm: editTarget1rmPct ? (parseInt(editTarget1rmPct) || null) : null,
           // migration 012 — independent warmup marker
           is_warmup:             editIsWarmup,
+          // Coach note shown to the athlete (phase_exercises.notes). Empty = clear.
+          notes:                 editNotes.trim() || null,
         }),
       },
     )
@@ -2733,6 +2745,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                             🤸 Bài khởi động
                           </p>
                         )}
+                        {pe.notes && (
+                          <p className="text-[11px] text-ink/50 mt-1 leading-snug whitespace-pre-line">
+                            📝 {pe.notes}
+                          </p>
+                        )}
                       </td>
 
                       {/* ── Movement pattern ── */}
@@ -3165,6 +3182,22 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                     </div>
                   </label>
 
+                  {/* ── Ghi chú cho học viên (phase_exercises.notes) ───────────────── */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold font-sans uppercase tracking-wide text-ink/60">
+                      Ghi chú bài tập
+                      <span className="ml-1.5 font-normal normal-case text-ink/35">(học viên sẽ thấy)</span>
+                    </label>
+                    <textarea
+                      value={exerciseNotes}
+                      onChange={e => setExerciseNotes(e.target.value)}
+                      rows={2}
+                      maxLength={300}
+                      placeholder="vd: Giữ lưng thẳng, hạ chậm 3 giây, nghỉ 90s giữa hiệp…"
+                      className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink leading-snug focus:border-amber focus:ring-1 focus:ring-amber outline-none resize-y placeholder:text-ink/30"
+                    />
+                  </div>
+
                   {/* ── STT / Order label ── */}
                   <div className="flex items-start gap-3">
                     {loadingStyle === 'horizontal' ? (
@@ -3480,6 +3513,22 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 </p>
               </div>
             </label>
+
+            {/* ── Ghi chú cho học viên (phase_exercises.notes) ── */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                Ghi chú bài tập
+                <span className="ml-1.5 font-normal normal-case text-ink/35">(học viên sẽ thấy)</span>
+              </label>
+              <textarea
+                value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+                rows={2}
+                maxLength={300}
+                placeholder="vd: Giữ lưng thẳng, hạ chậm 3 giây, nghỉ 90s giữa hiệp…"
+                className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink leading-snug focus:border-amber focus:ring-1 focus:ring-amber outline-none resize-y placeholder:text-ink/30"
+              />
+            </div>
 
             {/* ── STT / Order label ── */}
             <div className="flex flex-col gap-1.5 max-w-[220px]">

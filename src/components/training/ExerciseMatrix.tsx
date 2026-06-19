@@ -195,6 +195,12 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       {pe.is_amrap && (
                         <span className="mt-1 inline-flex items-center rounded-full bg-amber/15 border border-amber/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber leading-none">🔥 AMRAP</span>
                       )}
+                      {pe.is_warmup && (
+                        <span className="mt-1 inline-flex items-center rounded-full bg-sky-400/12 border border-sky-400/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-600 leading-none">🤸 Khởi động</span>
+                      )}
+                      {pe.notes && (
+                        <p className="mt-1.5 text-[10px] text-ink/55 leading-snug whitespace-pre-line">📝 {pe.notes}</p>
+                      )}
                     </td>
                     <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')} style={{ width: 96 }}>
                       <p className="font-mono text-[11px] text-ink/65 whitespace-nowrap">{targetLabelOf(pe)}</p>
@@ -363,8 +369,19 @@ function MobileFocus(p: MobileFocusProps) {
             {pe.is_amrap && (
               <span className="mt-1 inline-flex items-center rounded-full bg-amber/15 border border-amber/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber leading-none">🔥 AMRAP</span>
             )}
+            {pe.is_warmup && (
+              <span className="mt-1 inline-flex items-center rounded-full bg-sky-400/12 border border-sky-400/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-600 leading-none">🤸 Khởi động</span>
+            )}
           </div>
         </div>
+
+        {/* coach note — prescription guidance the athlete should follow */}
+        {pe.notes && (
+          <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-amber/70 mb-1">📝 Ghi chú từ HLV</p>
+            <p className="text-sm text-ink/75 leading-snug whitespace-pre-line">{pe.notes}</p>
+          </div>
+        )}
 
         {/* column labels */}
         <div className="flex items-center gap-3 px-1">
