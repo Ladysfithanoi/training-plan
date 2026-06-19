@@ -1622,8 +1622,9 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ week }),
       })
-      const data = await res.json()
-      if (res.ok) setPhaseExercises(data.exercises ?? [])
+      // Re-load through the ordered GET so the cloned rows come back in the same
+      // sort_order / STT order as Gốc (the route's own select is unordered).
+      if (res.ok) await loadPhaseExercises(selectedPhaseId)
     } finally {
       setWeekBusy(false)
     }
@@ -1634,8 +1635,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setWeekBusy(true)
     try {
       const res = await fetch(`/api/phases/${selectedPhaseId}/weeks?week=${week}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (res.ok) setPhaseExercises(data.exercises ?? [])
+      if (res.ok) await loadPhaseExercises(selectedPhaseId)
     } finally {
       setWeekBusy(false)
     }
@@ -2072,9 +2072,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                             )}
                           >
                             {day.label}
-                            {/* Pill showing how many exercises are assigned */}
+                            {/* Pill showing how many exercises are assigned —
+                                scoped to the current week (Gốc or override) so it
+                                matches the table below (migration 011). */}
                             {(() => {
-                              const n = phaseExercises.filter(pe => pe.day_id === day.id).length
+                              const n = scopedExercises.filter(pe => pe.day_id === day.id).length
                               return n > 0 ? (
                                 <span className={cn(
                                   'rounded-full text-[9px] font-bold px-1.5 py-0.5 leading-none',
@@ -2626,9 +2628,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
             <Card>
               <CardBody>
                 <p className="text-sm text-center text-ink/40 py-4">
-                  {splitType && activeDay
-                    ? `Ngày "${activeDay.label}" chưa có bài tập. Dùng "+ Thêm bài tập" để gán.`
-                    : 'Giai đoạn này chưa có bài tập nào.'}
+                  {viewingUncustomizedWeek
+                    ? `Tuần ${selectedWeek} đang dùng bộ Gốc (${baseExerciseCount} bài). Bấm “Tùy chỉnh tuần này” ở trên để chỉnh riêng cho tuần.`
+                    : splitType && activeDay
+                      ? `Ngày "${activeDay.label}" chưa có bài tập. Dùng "+ Thêm bài tập" để gán.`
+                      : 'Giai đoạn này chưa có bài tập nào.'}
                 </p>
               </CardBody>
             </Card>
