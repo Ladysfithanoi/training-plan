@@ -152,3 +152,96 @@ export async function POST(request: Request) {
   const origin = new URL(request.url).origin
   return NextResponse.json({ token, url: `${origin}/p/${token}` }, { status: 201 })
 }
+
+/**
+ * DELETE /api/magic-link
+ * Body: { user_id: string }
+ *
+ * Revokes the athlete's shareable link by clearing their magic_token. The old
+ * URL stops resolving immediately (resolveGuestToken → null → 404). A brand-new
+ * token can be issued later via POST. Only admins, or the coach who created the
+ * student, may call this endpoint.
+ */
+export async function DELETE(request: Request) {
+  // ── Staff auth check ───────────────────────────────────────────────────────
+  let caller
+  try {
+    caller = await requireStaff()
+  } catch {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // ── Parse body ─────────────────────────────────────────────────────────────
+  let user_id: string
+  try {
+    const body = await request.json()
+    user_id = body.user_id
+  } catch {
+    return NextResponse.json({ error: 'Yêu cầu không hợp lệ — body phải là JSON' }, { status: 400 })
+  }
+
+  if (!user_id) {
+    return NextResponse.json({ error: 'user_id là bắt buộc' }, { status: 400 })
+  }
+
+  // ── Build admin client (service-role key, localized) ───────────────────────
+  const supabaseUrl        = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error('[DELETE /api/magic-link] Missing env vars:', {
+      supabaseUrl: !!supabaseUrl,
+      supabaseServiceKey: !!supabaseServiceKey,
+    })
+    return NextResponse.json(
+      { error: 'Thiếu cấu hình môi trường hệ thống trên Server.' },
+      { status: 500 },
+    )
+  }
+
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      autoRefreshToken:   false,
+      persistSession:     false,
+      detectSessionInUrl: false,
+    },
+  })
+
+  // ── Coach ownership guard ──────────────────────────────────────────────────
+  // This route uses the service-role client (bypasses RLS); coaches may only
+  // revoke links for students they created.
+  const { data: profile, error: profileFetchError } = await supabaseAdmin
+    .from('profiles')
+    .select('id, created_by')
+    .eq('id', user_id)
+    .maybeSingle()
+
+  if (profileFetchError) {
+    console.error('[DELETE /api/magic-link] Profile query error:', profileFetchError)
+    return NextResponse.json({ error: profileFetchError.message }, { status: 500 })
+  }
+
+  if (!profile) {
+    return NextResponse.json({ error: 'Học viên không tồn tại.' }, { status: 404 })
+  }
+
+  if (caller.role !== 'admin' && profile.created_by !== caller.id) {
+    return NextResponse.json(
+      { error: 'Bạn chỉ có thể thu hồi liên kết của học viên của mình.' },
+      { status: 403 },
+    )
+  }
+
+  // ── Clear the token ────────────────────────────────────────────────────────
+  const { error: updateError } = await supabaseAdmin
+    .from('profiles')
+    .update({ magic_token: null })
+    .eq('id', user_id)
+
+  if (updateError) {
+    console.error('[DELETE /api/magic-link] Token clear failed:', updateError)
+    return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ revoked: true }, { status: 200 })
+}

@@ -56,6 +56,8 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
   const [magicResult, setMagicResult] = useState<{ token: string; url: string } | null>(null)
   const [magicError, setMagicError] = useState<string | null>(null)
   const [magicCopied, setMagicCopied] = useState(false)
+  const [magicRevoking, setMagicRevoking] = useState(false)
+  const [magicRevoked, setMagicRevoked] = useState(false)
 
   // Xoá học viên — replaces window.confirm() with <ConfirmModal>
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -175,6 +177,7 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
     setMagicResult(null)
     setMagicError(null)
     setMagicCopied(false)
+    setMagicRevoked(false)
     setMagicGenerating(true)
     try {
       const res = await fetch('/api/magic-link', {
@@ -200,6 +203,27 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
       setTimeout(() => setMagicCopied(false), 2500)
     } catch {
       // Fallback: select text in the input
+    }
+  }
+
+  async function handleRevokeMagicLink() {
+    if (!magicLinkOpen) return
+    setMagicRevoking(true)
+    setMagicError(null)
+    try {
+      const res = await fetch('/api/magic-link', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: magicLinkOpen.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Không thể thu hồi liên kết')
+      setMagicResult(null)
+      setMagicRevoked(true)
+    } catch (err) {
+      setMagicError(err instanceof Error ? err.message : 'Lỗi không xác định')
+    } finally {
+      setMagicRevoking(false)
     }
   }
 
@@ -592,7 +616,7 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
       {/* Modal: Gửi chương trình (Magic Link) */}
       <Modal
         open={!!magicLinkOpen}
-        onClose={() => { setMagicLinkOpen(null); setMagicResult(null); setMagicError(null) }}
+        onClose={() => { setMagicLinkOpen(null); setMagicResult(null); setMagicError(null); setMagicRevoked(false) }}
         title="Chia sẻ Chương trình"
       >
         <div className="space-y-5">
@@ -670,13 +694,38 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
               <p className="text-xs text-ink/35 text-center">
                 Liên kết này không thay đổi — bạn có thể chia sẻ lại bất cứ lúc nào.
               </p>
+
+              {/* Revoke */}
+              <div className="border-t border-ink/8 pt-3">
+                <Button
+                  variant="ghost"
+                  loading={magicRevoking}
+                  onClick={handleRevokeMagicLink}
+                  className="w-full text-danger hover:bg-danger/8"
+                >
+                  Thu hồi liên kết
+                </Button>
+                <p className="text-xs text-ink/35 text-center mt-1.5">
+                  Sau khi thu hồi, liên kết hiện tại sẽ ngừng hoạt động ngay lập tức.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Revoked state */}
+          {magicRevoked && !magicGenerating && (
+            <div className="rounded-xl border border-danger/20 bg-danger/5 p-4 text-center space-y-1">
+              <p className="text-sm font-semibold text-danger">Đã thu hồi liên kết</p>
+              <p className="text-xs text-ink/50">
+                Liên kết cũ không còn truy cập được. Nhấn “Gửi link” lại bất cứ lúc nào để tạo liên kết mới.
+              </p>
             </div>
           )}
 
           {/* Close */}
           <Button
             variant="secondary"
-            onClick={() => { setMagicLinkOpen(null); setMagicResult(null); setMagicError(null) }}
+            onClick={() => { setMagicLinkOpen(null); setMagicResult(null); setMagicError(null); setMagicRevoked(false) }}
             className="w-full"
           >
             Đóng
