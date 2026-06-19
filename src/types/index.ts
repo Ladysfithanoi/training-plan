@@ -59,6 +59,22 @@ export interface Profile {
   trial_expires_at?: string | null
 }
 
+// ─── Announcements (Bảng tin) — migration 010 ────────────────────────────────
+/**
+ * An admin-authored announcement card shown above the user guide. Short-lived:
+ * the app auto-deletes rows older than 48h and caps the table at 6 items.
+ */
+export interface Announcement {
+  id: string
+  title: string
+  content: string
+  /** Base64 data-URL of the cover image, or null when none was chosen. */
+  image_url: string | null
+  /** Admin who posted it — null if that profile was later deleted. */
+  created_by: string | null
+  created_at: string
+}
+
 // ─── Movement Patterns ───────────────────────────────────────────────────────
 export interface MovementPattern {
   id: string

@@ -14,6 +14,8 @@ interface NavItem {
   label:     string
   icon:      React.ReactNode
   adminOnly?: boolean
+  /** Stricter than adminOnly: shown to admins only, hidden from coach/trial staff. */
+  adminStrict?: boolean
   /** Visually emphasise this item (amber + star) as the recommended starting point. */
   highlight?: boolean
 }
@@ -91,6 +93,14 @@ const adminNavItems: NavItem[] = [
     label:     'Giáo án tập luyện',
     adminOnly: true,
     icon:      <Icon d="M4 6h16M4 10h16M4 14h16M4 18h16" />,
+  },
+  {
+    // Admin-only: post announcements (Bảng tin) shown above the user guide.
+    href:        '/admin/announcements',
+    label:       'Cập nhật',
+    adminOnly:   true,
+    adminStrict: true,
+    icon:        <Icon d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />,
   },
 ]
 
@@ -221,7 +231,9 @@ export function Sidebar({ profile, onLogout }: SidebarProps) {
                 {staffSectionLabel}
               </p>
             </div>
-            {adminNavItems.map(item => (
+            {adminNavItems
+              .filter(item => !item.adminStrict || isAdmin)
+              .map(item => (
               <Link
                 key={item.href}
                 href={item.href}
