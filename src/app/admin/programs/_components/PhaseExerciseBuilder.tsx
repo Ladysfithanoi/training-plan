@@ -392,6 +392,9 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [isAmrap, setIsAmrap]                 = useState(false)
   /** Explicit load prescription as integer % of 1RM (e.g. 85). Empty = off. */
   const [target1rmPct, setTarget1rmPct]       = useState('')
+  // ── Migration 012: warmup flag ──────────────────────────────────────────────
+  /** When true the exercise is marked as a warm-up ("Bài khởi động"). */
+  const [isWarmup, setIsWarmup]               = useState(false)
 
   // ── Phase week-type (migration 006) ──────────────────────────────────────────
   /** Training stimulus character for the currently selected phase. */
@@ -429,6 +432,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   const [editOrderLabel, setEditOrderLabel]     = useState('')
   const [editIsAmrap, setEditIsAmrap]           = useState(false)
   const [editTarget1rmPct, setEditTarget1rmPct] = useState('')
+  const [editIsWarmup, setEditIsWarmup]         = useState(false)
   const [editSaving, setEditSaving]             = useState(false)
   const [editError, setEditError]               = useState<string | null>(null)
 
@@ -665,6 +669,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
       setEditingOLId(null)
       setIsAmrap(false)
       setTarget1rmPct('')
+      setIsWarmup(false)
       return
     }
 
@@ -707,6 +712,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     const newIsStrength = newWeekType === 'peaking' || newWeekType === 'taper'
     setIsAmrap(false)
     setTarget1rmPct('')
+    setIsWarmup(false)
     setTargetRepMin('1')
     setTargetRepMax(newIsStrength ? '3' : '12')
     setRirTarget(newIsStrength ? '0' : '2')
@@ -808,12 +814,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
         : b,
     ))
 
-    // Reset fields that belong exclusively to the OTHER training context so that
-    // stale values from the hidden panel never sneak into handleAdd().
+    // AMRAP is a hypertrophy-only technique → clear it when entering strength.
+    // %1RM is now an always-available optional field, so it is NOT cleared on
+    // context switch (the coach may prescribe it in any phase).
     if (newIsStrength) {
-      setIsAmrap(false)     // AMRAP is a hypertrophy-only technique
-    } else {
-      setTarget1rmPct('')   // %1RM prescription belongs to strength/peaking only
+      setIsAmrap(false)
     }
 
     setWeekTypeSaving(true)
@@ -1035,14 +1040,15 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
         // ── Context-aware periodisation fields (migration 006) ──────────────
         // Strength / Peaking context → prescribe by %1RM; RIR and AMRAP suppressed
-        // Hypertrophy context        → prescribe by RIR; %1RM suppressed
+        // Hypertrophy context        → prescribe by RIR; AMRAP allowed
         rir_target:            isStrengthContext
           ? null
           : (parseInt(rirTarget) || 2),
         is_amrap:              isStrengthContext ? false : isAmrap,
-        target_percentage_1rm: isStrengthContext && target1rmPct
-          ? (parseInt(target1rmPct) || null)
-          : null,
+        // %1RM is an always-available optional field (any phase). Empty = off.
+        target_percentage_1rm: target1rmPct ? (parseInt(target1rmPct) || null) : null,
+        // migration 012 — independent warmup marker
+        is_warmup:             isWarmup,
       }),
     })
 
@@ -1066,6 +1072,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     // Migration 006 — reset advanced periodisation fields
     setIsAmrap(false)
     setTarget1rmPct('')
+    // Migration 012 — reset warmup flag
+    setIsWarmup(false)
   }
 
   function handleRemove(phaseExerciseId: string) {
@@ -1113,6 +1121,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setEditOrderLabel(pe.order_label ?? '')
     setEditIsAmrap(pe.is_amrap ?? false)
     setEditTarget1rmPct(pe.target_percentage_1rm != null ? String(pe.target_percentage_1rm) : '')
+    setEditIsWarmup(pe.is_warmup ?? false)
     setEditError(null)
   }
 
@@ -1137,12 +1146,13 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
           // Context-aware periodisation fields (mirror handleAdd):
           //   Strength/Peaking → prescribe by %1RM, RIR & AMRAP suppressed
-          //   Hypertrophy      → prescribe by RIR, %1RM suppressed
+          //   Hypertrophy      → prescribe by RIR, AMRAP allowed
           rir_target:            isStrengthContext ? null : (parseInt(editRir) || 2),
           is_amrap:              isStrengthContext ? false : editIsAmrap,
-          target_percentage_1rm: isStrengthContext && editTarget1rmPct
-            ? (parseInt(editTarget1rmPct) || null)
-            : null,
+          // %1RM is an always-available optional field (any phase). Empty = off.
+          target_percentage_1rm: editTarget1rmPct ? (parseInt(editTarget1rmPct) || null) : null,
+          // migration 012 — independent warmup marker
+          is_warmup:             editIsWarmup,
         }),
       },
     )
@@ -1537,6 +1547,7 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           loading_style:         pe.loading_style ?? 'horizontal',
           is_amrap:              pe.is_amrap,
           target_percentage_1rm: pe.target_percentage_1rm,
+          is_warmup:             pe.is_warmup,
           notes:                 pe.notes,
           // Land copies in the current week scope (migration 011).
           week_number:           selectedWeek,
@@ -2717,6 +2728,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                           )}
                         </div>
                         <p className="text-xs text-ink/40">{pe.exercise?.type}</p>
+                        {pe.is_warmup && (
+                          <p className="text-[10px] font-semibold text-sky-600/80 mt-0.5">
+                            🤸 Bài khởi động
+                          </p>
+                        )}
                       </td>
 
                       {/* ── Movement pattern ── */}
@@ -3089,6 +3105,66 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
 
                   )}
 
+                  {/* ── %1RM mục tiêu (tùy chọn) — hypertrophy/standard context ──────
+                      Strength context already exposes %1RM in column 4 of the grid;
+                      here we surface it for every other context so the coach can
+                      prescribe an explicit load in any phase. */}
+                  {!isStrengthContext && (
+                    <div className="flex flex-col gap-1.5 max-w-[240px]">
+                      <label className="text-xs font-semibold font-sans uppercase tracking-wide text-ink/60">
+                        % 1RM mục tiêu
+                        <span className="ml-1.5 font-normal normal-case text-ink/35">(tùy chọn)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min="30"
+                          max="100"
+                          step="5"
+                          value={target1rmPct}
+                          onChange={e => setTarget1rmPct(e.target.value)}
+                          placeholder="vd 70"
+                          className="h-10 w-full rounded-lg border border-ink/15 bg-white px-3 pr-9 font-mono text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none placeholder:font-mono placeholder:text-ink/30"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs text-ink/40 pointer-events-none">
+                          %
+                        </span>
+                      </div>
+                      {target1rmPct && (
+                        <span className="self-start inline-flex items-center rounded-full bg-danger/10 border border-danger/25 px-2 py-0.5 font-mono text-[10px] font-bold text-danger">
+                          {target1rmPct}% 1RM
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── Bài khởi động (warmup) — independent display marker ─────────── */}
+                  <label className={cn(
+                    'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
+                    isWarmup
+                      ? 'border-sky-400/45 bg-sky-400/8'
+                      : 'border-ink/10 bg-ink/2 hover:border-ink/20',
+                  )}>
+                    <input
+                      type="checkbox"
+                      checked={isWarmup}
+                      onChange={e => setIsWarmup(e.target.checked)}
+                      className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-sky-500"
+                    />
+                    <div className="min-w-0">
+                      <p className={cn(
+                        'text-xs font-bold font-sans',
+                        isWarmup ? 'text-sky-600' : 'text-ink',
+                      )}>
+                        🤸 Bài khởi động
+                      </p>
+                      <p className="text-[11px] font-sans text-ink/45 mt-0.5 leading-snug">
+                        Đánh dấu đây là bài khởi động — bảng bài tập sẽ hiện ghi chú “Bài khởi động”
+                        để người tập nhận biết.
+                      </p>
+                    </div>
+                  </label>
+
                   {/* ── STT / Order label ── */}
                   <div className="flex items-start gap-3">
                     {loadingStyle === 'horizontal' ? (
@@ -3371,6 +3447,39 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                 </div>
               </label>
             )}
+
+            {/* ── %1RM mục tiêu (tùy chọn) — hypertrophy/standard context ──
+                Strength context shows %1RM in the grid's column 4 above. */}
+            {!isStrengthContext && (
+              <div className="max-w-[220px]">
+                <Input
+                  label="% 1RM mục tiêu (tùy chọn)" type="number"
+                  value={editTarget1rmPct} onChange={e => setEditTarget1rmPct(e.target.value)}
+                  placeholder="vd 70"
+                />
+              </div>
+            )}
+
+            {/* ── Bài khởi động (warmup) — independent display marker ── */}
+            <label className={cn(
+              'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
+              editIsWarmup ? 'border-sky-400/45 bg-sky-400/8' : 'border-ink/10 bg-ink/2 hover:border-ink/20',
+            )}>
+              <input
+                type="checkbox"
+                checked={editIsWarmup}
+                onChange={e => setEditIsWarmup(e.target.checked)}
+                className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-sky-500"
+              />
+              <div className="min-w-0">
+                <p className={cn('text-xs font-bold', editIsWarmup ? 'text-sky-600' : 'text-ink')}>
+                  🤸 Bài khởi động
+                </p>
+                <p className="text-[11px] text-ink/45 mt-0.5 leading-snug">
+                  Hiện ghi chú “Bài khởi động” trong bảng để người tập nhận biết.
+                </p>
+              </div>
+            </label>
 
             {/* ── STT / Order label ── */}
             <div className="flex flex-col gap-1.5 max-w-[220px]">

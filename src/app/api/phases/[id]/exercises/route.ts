@@ -2,8 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { requireContentAuthor } from '@/lib/auth'
 
 // Columns added by later migrations — may not exist on the live DB yet.
-// 006: is_amrap, target_percentage_1rm · 008: sort_order · 011: week_number
-const OPTIONAL_COLUMNS = ['is_amrap', 'target_percentage_1rm', 'sort_order', 'week_number'] as const
+// 006: is_amrap, target_percentage_1rm · 008: sort_order · 011: week_number · 012: is_warmup
+const OPTIONAL_COLUMNS = ['is_amrap', 'target_percentage_1rm', 'sort_order', 'week_number', 'is_warmup'] as const
 
 /** True when an error is PostgREST/Postgres reporting a missing column. */
 function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -90,6 +90,8 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
   const optional = {
     is_amrap:              body.is_amrap              ?? false,
     target_percentage_1rm: body.target_percentage_1rm ?? null,
+    // migration 012 — warmup display marker
+    is_warmup:             body.is_warmup             ?? false,
     // null = base row (applies to all weeks); 1..N = override for that week.
     week_number:           body.week_number           ?? null,
     ...(nextSortOrder !== undefined ? { sort_order: nextSortOrder } : {}),
@@ -140,8 +142,8 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
   ]
   // String fields — store as-is (null clears the value)
   const stringFields = ['notes', 'day_id', 'order_label', 'loading_style']
-  // Boolean fields (migration 006)
-  const booleanFields = ['is_amrap']
+  // Boolean fields (migration 006 + 012)
+  const booleanFields = ['is_amrap', 'is_warmup']
 
   const patch: Record<string, unknown> = {}
   // exercise_id — swapping the underlying exercise. Required NOT NULL, so only

@@ -198,6 +198,13 @@ export interface PhaseExercise {
    */
   target_percentage_1rm: number | null
 
+  // ── Warmup flag (migration 012) ───────────────────────────────────────────────
+  /**
+   * When true this exercise is a warm-up ("Bài khởi động"), not a working set.
+   * Display-only marker — does not alter any other prescription field.
+   */
+  is_warmup: boolean
+
   // ── Per-week prescription (migration 011) ─────────────────────────────────────
   /**
    * Which week of the meso this row applies to.
