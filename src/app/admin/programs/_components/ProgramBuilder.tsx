@@ -119,7 +119,8 @@ export function ProgramBuilder({
    *  trial accounts (canAuthor=false) can never edit. */
   const canEdit = (b: BlockWithPhases) => canAuthor && (isAdmin || b.created_by === currentUserId)
 
-  // ── Sort + pagination state ────────────────────────────────────────────────
+  // ── Search + sort + pagination state ───────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('')
   const [sortKey,     setSortKey]     = useState<SortKey>('date_desc')
   const [currentPage, setCurrentPage] = useState(1)
 
@@ -145,14 +146,29 @@ export function ProgramBuilder({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const confirmDeleteBlock = blocks.find(b => b.id === confirmDeleteId) ?? null
 
-  // ── Sort-then-paginate pipeline ───────────────────────────────────────────
-  const sortedBlocks    = sortBlocks(blocks, sortKey)
+  // ── Search → sort → paginate pipeline ─────────────────────────────────────
+  const query           = searchQuery.trim().toLowerCase()
+  const filteredBlocks  = query
+    ? blocks.filter(b =>
+        b.name.toLowerCase().includes(query) ||
+        (b.description ?? '').toLowerCase().includes(query),
+      )
+    : blocks
+  const sortedBlocks    = sortBlocks(filteredBlocks, sortKey)
   const totalPages      = Math.max(1, Math.ceil(sortedBlocks.length / ITEMS_PER_PAGE))
+  // Clamp the page if a search/sort change shrank the result set below it.
+  const safePage        = Math.min(currentPage, totalPages)
   const paginatedBlocks = sortedBlocks.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage       * ITEMS_PER_PAGE,
+    (safePage - 1) * ITEMS_PER_PAGE,
+    safePage       * ITEMS_PER_PAGE,
   )
   const selectedBlock   = blocks.find(b => b.id === selectedBlockId) ?? null
+
+  // ── Search change helper (always resets to page 1) ────────────────────────
+  function applySearch(value: string) {
+    setSearchQuery(value)
+    setCurrentPage(1)
+  }
 
   // ── Sort change helper (always resets to page 1) ──────────────────────────
   function applySort(key: SortKey) {
@@ -318,6 +334,37 @@ export function ProgramBuilder({
           )}
         </div>
 
+        {/* ── Search box ───────────────────────────────────────────────────── */}
+        {blocks.length > 1 && (
+          <div className="relative">
+            <svg
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink/30"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => applySearch(e.target.value)}
+              placeholder="Tìm khối tập theo tên…"
+              className="w-full h-9 rounded-lg border border-ink/12 bg-white pl-9 pr-9 text-sm text-ink placeholder:text-ink/35 focus:border-amber focus:ring-1 focus:ring-amber outline-none transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => applySearch('')}
+                aria-label="Xoá tìm kiếm"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/5 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ── Sort toolbar ─────────────────────────────────────────────────── */}
         {blocks.length > 1 && (
           <div className="flex flex-col gap-1.5">
@@ -363,7 +410,7 @@ export function ProgramBuilder({
               />
 
               <span className="ml-auto font-mono text-[10px] text-ink/30 tabular-nums whitespace-nowrap shrink-0">
-                {blocks.length} khối
+                {query ? `${filteredBlocks.length}/${blocks.length}` : blocks.length} khối
               </span>
             </div>
           </div>
@@ -375,6 +422,14 @@ export function ProgramBuilder({
             <CardBody>
               <p className="text-sm text-center text-ink/40 py-4">
                 Chưa có khối tập nào.<br />Hãy tạo khối tập đầu tiên của bạn!
+              </p>
+            </CardBody>
+          </Card>
+        ) : sortedBlocks.length === 0 ? (
+          <Card>
+            <CardBody>
+              <p className="text-sm text-center text-ink/40 py-4">
+                Không tìm thấy khối tập nào khớp với “{searchQuery.trim()}”.
               </p>
             </CardBody>
           </Card>
@@ -432,8 +487,8 @@ export function ProgramBuilder({
               <div className="flex items-center justify-between pt-0.5">
                 <button
                   type="button"
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(p => p - 1)}
+                  disabled={safePage === 1}
+                  onClick={() => setCurrentPage(safePage - 1)}
                   aria-label="Trang trước"
                   className="h-8 w-8 rounded-lg flex items-center justify-center border border-ink/12 text-ink/40 hover:text-ink hover:border-ink/30 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                 >
@@ -443,13 +498,13 @@ export function ProgramBuilder({
                 </button>
 
                 <span className="font-mono text-xs text-ink/45 tabular-nums select-none">
-                  Trang {currentPage} / {totalPages}
+                  Trang {safePage} / {totalPages}
                 </span>
 
                 <button
                   type="button"
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(p => p + 1)}
+                  disabled={safePage === totalPages}
+                  onClick={() => setCurrentPage(safePage + 1)}
                   aria-label="Trang sau"
                   className="h-8 w-8 rounded-lg flex items-center justify-center border border-ink/12 text-ink/40 hover:text-ink hover:border-ink/30 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                 >
