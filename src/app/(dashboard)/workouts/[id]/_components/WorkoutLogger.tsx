@@ -618,12 +618,12 @@ export function WorkoutLogger({
             </span>
             <span className="ml-auto flex items-center gap-2 text-[10px] text-ink/30">
               <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded border border-amber/30 bg-amber/8" />
-                Kg
+                <span className="h-2 w-2 rounded border border-amber/40 bg-amber/10" />
+                Đang nhập
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded border border-herb/30 bg-herb/8" />
-                Lần
+                <span className="h-2 w-2 rounded border border-herb bg-herb-wash" />
+                Đã đạt
               </span>
               <span className="hidden sm:inline text-ink/20">← vuốt ngang để xem thêm hiệp →</span>
             </span>
@@ -660,8 +660,8 @@ export function WorkoutLogger({
                         Hiệp {i + 1}
                       </span>
                       <div className="flex justify-center gap-2 mt-0.5">
-                        <span className="text-[8px] text-amber/50 font-mono font-semibold">Kg</span>
-                        <span className="text-[8px] text-herb/50 font-mono font-semibold">Lần</span>
+                        <span className="text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
+                        <span className="text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
                       </div>
                     </th>
                   ))}
@@ -731,6 +731,7 @@ export function WorkoutLogger({
                         const cell      = grid[cellKey] ?? { setId: null, kg: '', reps: '' }
                         const saveState = cellSave[cellKey] ?? 'idle'
                         const isTarget  = setNum <= targetSets
+                        const setDone   = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
 
                         return (
                           <td key={setIdx}
@@ -754,15 +755,16 @@ export function WorkoutLogger({
                                 onBlur={() => flushCell(exerciseId, setNum)}
                                 aria-label={`${exName} hiệp ${setNum} kg`}
                                 className={cn(
-                                  'h-8 w-[42px] rounded border text-center text-sm font-mono tabular-nums outline-none transition-colors bg-transparent',
-                                  'placeholder:text-ink/18 disabled:cursor-not-allowed',
-                                  cell.kg
-                                    ? 'border-amber/35 text-ink font-semibold'
-                                    : 'border-ink/10 text-ink/40',
-                                  saveState === 'saving' && 'border-amber/60 animate-pulse',
-                                  saveState === 'error'  && 'border-danger/45 bg-danger/4',
-                                  !isCompleted && !cell.kg && 'focus:border-amber/50 focus:bg-amber/4',
-                                  !isCompleted &&  cell.kg && 'focus:border-amber focus:bg-amber/4',
+                                  'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                  'placeholder:text-ink/30 disabled:cursor-not-allowed',
+                                  setDone
+                                    ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
+                                    : cell.kg
+                                      ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
+                                      : 'bg-bone border-[#C7BCA4] text-ink/45',
+                                  saveState === 'saving' && 'border-amber animate-pulse',
+                                  saveState === 'error'  && 'border-danger/60 bg-danger/5',
+                                  !isCompleted && 'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                                 )}
                               />
                               {/* Reps */}
@@ -777,15 +779,16 @@ export function WorkoutLogger({
                                 onBlur={() => flushCell(exerciseId, setNum)}
                                 aria-label={`${exName} hiệp ${setNum} reps`}
                                 className={cn(
-                                  'h-8 w-[42px] rounded border text-center text-sm font-mono tabular-nums outline-none transition-colors bg-transparent',
-                                  'placeholder:text-ink/18 disabled:cursor-not-allowed',
-                                  cell.reps
-                                    ? 'border-herb/35 text-ink font-semibold'
-                                    : 'border-ink/10 text-ink/40',
-                                  saveState === 'saving' && 'border-herb/60 animate-pulse',
-                                  saveState === 'error'  && 'border-danger/45 bg-danger/4',
-                                  !isCompleted && !cell.reps && 'focus:border-herb/50 focus:bg-herb/4',
-                                  !isCompleted &&  cell.reps && 'focus:border-herb focus:bg-herb/4',
+                                  'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                  'placeholder:text-ink/30 disabled:cursor-not-allowed',
+                                  setDone
+                                    ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
+                                    : cell.reps
+                                      ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
+                                      : 'bg-bone border-[#C7BCA4] text-ink/45',
+                                  saveState === 'saving' && 'border-amber animate-pulse',
+                                  saveState === 'error'  && 'border-danger/60 bg-danger/5',
+                                  !isCompleted && 'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                                 )}
                               />
                             </div>

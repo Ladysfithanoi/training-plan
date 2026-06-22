@@ -21,12 +21,15 @@
   --font-mono:  'JetBrains Mono', ui-monospace,   Consolas,  monospace;
 
   /* Brand colours */
-  --color-paper:   #F6F2EA;   /* Background  — 90 % of surfaces */
-  --color-ink:     #14110E;   /* Primary text + strong CTAs */
-  --color-amber:   #B5651E;   /* Eyebrow, links, italic highlights (≤5 %) */
-  --color-herb:    #5C6E48;   /* Coach notes, neutral data */
-  --color-slate:   #3A5567;   /* Success / online / achieved */
-  --color-danger:  #A33A2A;   /* Errors, delays, overshoots */
+  --color-paper:     #F6F2EA;   /* Background  — 90 % of surfaces */
+  --color-bone:      #FBF9F4;   /* Card / input surface */
+  --color-ink:       #14110E;   /* Primary text + strong CTAs */
+  --color-amber:     #B5651E;   /* Mục tiêu / đang làm / CTA */
+  --color-herb:      #5C6E48;   /* Trạng thái "đạt / hoàn thành" */
+  --color-herb-deep: #3F4D31;   /* Herb text on wash */
+  --color-herb-wash: #DDE3CC;   /* Herb tint background — set đã đạt */
+  --color-slate:     #3A5567;   /* Success / online / achieved */
+  --color-danger:    #A33A2A;   /* Errors, delays, overshoots */
 
   /* Semantic aliases (Tailwind generates bg-surface, bg-accent, etc.) */
   --color-surface:   var(--color-paper);

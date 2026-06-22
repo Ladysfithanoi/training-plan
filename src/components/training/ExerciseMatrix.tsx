@@ -144,8 +144,8 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
           <span className="text-[10px] font-semibold uppercase tracking-widest text-ink/35">{legendLabel}</span>
           <span className="ml-auto flex items-center gap-2.5 text-[10px] text-ink/30">
             {statusChips}
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded border border-amber/30 bg-amber/8" />Kg</span>
-            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded border border-herb/30 bg-herb/8" />Lần</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded border border-amber/40 bg-amber/10" />Đang nhập</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded border border-herb bg-herb-wash" />Đã đạt</span>
           </span>
         </div>
 
@@ -166,8 +166,8 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                   <th key={i} className="border-b border-r border-ink/8 bg-paper/80 px-2 py-2 text-center" style={{ width: 96 }}>
                     <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30 block">Hiệp {i + 1}</span>
                     <div className="flex justify-center gap-2 mt-0.5">
-                      <span className="text-[8px] text-amber/50 font-mono font-semibold">Kg</span>
-                      <span className="text-[8px] text-herb/50 font-mono font-semibold">Lần</span>
+                      <span className="text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
+                      <span className="text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
                     </div>
                   </th>
                 ))}
@@ -213,6 +213,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       const cell       = getCell(grid, activeSets, exerciseId, setNum)
                       const ss         = cellSave[cellKey] ?? 'idle'
                       const isTarget   = setNum <= targetSets
+                      const setDone    = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
                       const overloadKg = isOverloadWeek ? overloadSuggestions[cellKey] : undefined
                       return (
                         <td key={si} className={cn('border-b border-r border-ink/7 px-1.5 py-2', rowTint ? 'bg-ink/[0.018]' : '', !isTarget && 'opacity-30')} style={{ width: 96 }}>
@@ -225,13 +226,14 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               onChange={e => onCellChange(exerciseId, setNum, 'kg', cleanKg(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
                               className={cn(
-                                'h-8 w-[42px] rounded border text-center text-sm font-mono tabular-nums outline-none transition-colors bg-transparent',
-                                cell.kg ? 'border-amber/35 text-ink font-semibold' : 'border-ink/10 text-ink/40',
-                                overloadKg && !cell.kg ? 'placeholder:text-amber/45 placeholder:font-medium' : 'placeholder:text-ink/18',
-                                ss === 'saving' && 'border-amber/60 animate-pulse',
-                                ss === 'error'  && 'border-danger/45 bg-danger/4',
-                                !cell.kg && 'focus:border-amber/50 focus:bg-amber/4',
-                                 cell.kg && 'focus:border-amber  focus:bg-amber/4',
+                                'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                setDone ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
+                                  : cell.kg ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
+                                  : 'bg-bone border-[#C7BCA4] text-ink/45',
+                                overloadKg && !cell.kg ? 'placeholder:text-amber/45 placeholder:font-medium' : 'placeholder:text-ink/30',
+                                ss === 'saving' && 'border-amber animate-pulse',
+                                ss === 'error'  && 'border-danger/60 bg-danger/5',
+                                'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                               )}
                             />
                             <input
@@ -241,12 +243,13 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               onChange={e => onCellChange(exerciseId, setNum, 'reps', cleanReps(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
                               className={cn(
-                                'h-8 w-[42px] rounded border text-center text-sm font-mono tabular-nums outline-none transition-colors bg-transparent placeholder:text-ink/18',
-                                cell.reps ? 'border-herb/35 text-ink font-semibold' : 'border-ink/10 text-ink/40',
-                                ss === 'saving' && 'border-herb/60 animate-pulse',
-                                ss === 'error'  && 'border-danger/45 bg-danger/4',
-                                !cell.reps && 'focus:border-herb/50 focus:bg-herb/4',
-                                 cell.reps && 'focus:border-herb  focus:bg-herb/4',
+                                'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors placeholder:text-ink/30',
+                                setDone ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
+                                  : cell.reps ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
+                                  : 'bg-bone border-[#C7BCA4] text-ink/45',
+                                ss === 'saving' && 'border-amber animate-pulse',
+                                ss === 'error'  && 'border-danger/60 bg-danger/5',
+                                'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                               )}
                             />
                           </div>
@@ -386,8 +389,8 @@ function MobileFocus(p: MobileFocusProps) {
         {/* column labels */}
         <div className="flex items-center gap-3 px-1">
           <span className="w-14 shrink-0" />
-          <span className="flex-1 text-center text-[10px] font-bold uppercase tracking-widest text-amber/60">Kg</span>
-          <span className="flex-1 text-center text-[10px] font-bold uppercase tracking-widest text-herb/60">Reps</span>
+          <span className="flex-1 text-center text-[10px] font-bold uppercase tracking-widest text-ink/45">Kg</span>
+          <span className="flex-1 text-center text-[10px] font-bold uppercase tracking-widest text-ink/45">Reps</span>
         </div>
 
         {/* set rows — big touch targets */}
@@ -397,6 +400,7 @@ function MobileFocus(p: MobileFocusProps) {
             const cellKey    = `${exerciseId}:${setNum}`
             const cell       = getCell(p.grid, p.activeSets, exerciseId, setNum)
             const ss         = p.cellSave[cellKey] ?? 'idle'
+            const setDone    = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
             const overloadKg = p.isOverloadWeek ? p.overloadSuggestions[cellKey] : undefined
             return (
               <div key={si} className="flex items-center gap-3">
@@ -409,12 +413,14 @@ function MobileFocus(p: MobileFocusProps) {
                   onChange={e => p.onCellChange(exerciseId, setNum, 'kg', cleanKg(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
                   className={cn(
-                    'flex-1 min-w-0 py-3 px-4 text-lg font-bold text-center rounded-xl border bg-slate-50 outline-none transition-colors tabular-nums',
-                    cell.kg ? 'border-amber/40 text-ink' : 'border-slate-200 text-ink/70',
-                    overloadKg && !cell.kg ? 'placeholder:text-amber/45' : 'placeholder:text-ink/25 placeholder:font-medium',
-                    ss === 'saving' && 'border-amber/60 animate-pulse',
-                    ss === 'error'  && 'border-danger/50 bg-danger/5',
-                    'focus:border-amber focus:bg-white',
+                    'flex-1 min-w-0 py-3 px-4 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums',
+                    setDone ? 'bg-herb-wash border-herb text-herb-deep'
+                      : cell.kg ? 'bg-bone border-[#C7BCA4] text-ink'
+                      : 'bg-bone border-[#C7BCA4] text-ink/70',
+                    overloadKg && !cell.kg ? 'placeholder:text-amber/45' : 'placeholder:text-ink/30 placeholder:font-medium',
+                    ss === 'saving' && 'border-amber animate-pulse',
+                    ss === 'error'  && 'border-danger/60 bg-danger/5',
+                    'focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                   )}
                 />
                 <input
@@ -424,11 +430,13 @@ function MobileFocus(p: MobileFocusProps) {
                   onChange={e => p.onCellChange(exerciseId, setNum, 'reps', cleanReps(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
                   className={cn(
-                    'flex-1 min-w-0 py-3 px-4 text-lg font-bold text-center rounded-xl border bg-slate-50 outline-none transition-colors tabular-nums placeholder:text-ink/25 placeholder:font-medium',
-                    cell.reps ? 'border-herb/40 text-ink' : 'border-slate-200 text-ink/70',
-                    ss === 'saving' && 'border-herb/60 animate-pulse',
-                    ss === 'error'  && 'border-danger/50 bg-danger/5',
-                    'focus:border-herb focus:bg-white',
+                    'flex-1 min-w-0 py-3 px-4 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums placeholder:text-ink/30 placeholder:font-medium',
+                    setDone ? 'bg-herb-wash border-herb text-herb-deep'
+                      : cell.reps ? 'bg-bone border-[#C7BCA4] text-ink'
+                      : 'bg-bone border-[#C7BCA4] text-ink/70',
+                    ss === 'saving' && 'border-amber animate-pulse',
+                    ss === 'error'  && 'border-danger/60 bg-danger/5',
+                    'focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                   )}
                 />
               </div>
