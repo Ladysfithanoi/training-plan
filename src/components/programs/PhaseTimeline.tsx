@@ -78,9 +78,9 @@ export function PhaseTimeline({ phases, userProgram }: PhaseTimelineProps) {
               </p>
 
               {/* Rep range zones */}
-              {phase.rep_ranges.length > 0 && (
+              {(phase.rep_ranges ?? []).length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
-                  {phase.rep_ranges.map((rr, i) => (
+                  {(phase.rep_ranges ?? []).map((rr, i) => (
                     <span
                       key={i}
                       className="inline-flex items-center rounded-md bg-ink/6 px-2 py-0.5 text-[10px] font-medium font-mono text-ink/70"

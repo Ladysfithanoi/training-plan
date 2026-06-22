@@ -49,7 +49,7 @@ export function RepRangeMatrix({ phases }: RepRangeMatrixProps) {
                 </div>
               </td>
               {trainingPhases.map(phase => {
-                const hasZone = phase.rep_ranges.some(
+                const hasZone = (phase.rep_ranges ?? []).some(
                   rr => rr.max > zone.min && rr.min < zone.max,
                 )
                 return (
