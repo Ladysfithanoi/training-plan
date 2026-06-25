@@ -116,6 +116,70 @@ export function buildWelcomeEmail(opts: {
   return { subject, html }
 }
 
+/**
+ * Builds the welcome email for a STAFF account (coach / admin). Unlike athletes,
+ * staff log in at the real login page with email + password — there is no
+ * passwordless magic link for them. So this email carries the login URL, their
+ * email (login id) and the temporary password the admin set, with a nudge to
+ * change it after first sign-in.
+ */
+export function buildStaffWelcomeEmail(opts: {
+  fullName: string | null
+  email: string
+  password: string
+  loginUrl: string
+  isAdmin: boolean
+}): { subject: string; html: string } {
+  const name = opts.fullName?.trim() || 'bạn'
+  const roleLabel = opts.isAdmin ? 'Quản trị viên' : 'Huấn luyện viên'
+  const subject = `Tài khoản ${roleLabel} ${BRAND} của bạn đã sẵn sàng`
+
+  const html = `
+  <div style="margin:0;padding:24px;background:#f5f5f0;font-family:'Segoe UI',Helvetica,Arial,sans-serif;color:#1c1c1a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e3da;">
+      <tr>
+        <td style="padding:28px 32px 8px;">
+          <p style="margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#5b7d5b;font-weight:600;">${BRAND}</p>
+          <h1 style="margin:12px 0 0;font-size:22px;line-height:1.3;color:#1c1c1a;">Chào ${escapeHtml(name)}, bạn đã được thêm làm ${roleLabel} 🎉</h1>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:12px 32px 0;font-size:15px;line-height:1.65;color:#3a3a35;">
+          <p style="margin:0 0 16px;">Một tài khoản <strong>${escapeHtml(roleLabel)}</strong> trên hệ thống <strong>${BRAND}</strong> vừa được tạo cho bạn. Đăng nhập bằng thông tin bên dưới để bắt đầu quản lý học viên và giáo án.</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 32px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f8f3;border:1px solid #e3e7d6;border-radius:10px;">
+            <tr><td style="padding:14px 18px;font-size:14px;color:#3a3a35;">
+              <p style="margin:0 0 6px;"><span style="color:#6b6b63;">Email đăng nhập:</span> <strong>${escapeHtml(opts.email)}</strong></p>
+              <p style="margin:0;"><span style="color:#6b6b63;">Mật khẩu tạm:</span> <strong style="font-family:'Courier New',monospace;">${escapeHtml(opts.password)}</strong></p>
+            </td></tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:18px 32px 8px;">
+          <a href="${opts.loginUrl}" style="display:inline-block;background:#5b7d5b;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 26px;border-radius:10px;">Đăng nhập ngay →</a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:14px 32px 0;font-size:13px;line-height:1.6;color:#6b6b63;">
+          <p style="margin:0 0 6px;">Hoặc mở liên kết: <a href="${opts.loginUrl}" style="color:#5b7d5b;word-break:break-all;">${opts.loginUrl}</a></p>
+          <p style="margin:10px 0 0;">Vì lý do bảo mật, hãy <strong>đổi mật khẩu</strong> sau lần đăng nhập đầu tiên (mở menu tài khoản ở chân thanh điều hướng bên trái → “Đổi mật khẩu”).</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:24px 32px 28px;border-top:1px solid #eeeee7;">
+          <p style="margin:18px 0 0;font-size:12px;color:#9a9a90;">Bạn nhận được email này vì có người đã tạo tài khoản ${escapeHtml(roleLabel.toLowerCase())} cho bạn tại <a href="${stripScheme(opts.loginUrl).replace(/\/login$/, '')}" style="color:#9a9a90;">${stripScheme(opts.loginUrl).replace(/\/login$/, '')}</a>. Nếu bạn không mong đợi email này, có thể bỏ qua nó.</p>
+        </td>
+      </tr>
+    </table>
+  </div>`
+
+  return { subject, html }
+}
+
 /** Minimal HTML-escape for interpolated user text (names). */
 function escapeHtml(value: string): string {
   return value

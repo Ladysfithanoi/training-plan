@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server'
 import { requireStaff } from '@/lib/auth'
 import { freshTrialWindow } from '@/lib/trial'
 import { generateMagicToken } from '@/lib/guestToken'
-import { sendEmail, buildWelcomeEmail, looksLikeEmail } from '@/lib/email'
+import { sendEmail, buildWelcomeEmail, buildStaffWelcomeEmail, looksLikeEmail } from '@/lib/email'
 
 // ── Shared admin-client factory (module-scoped helper, server-only) ──────────
 // Defined here rather than imported from lib so the env-var reads stay inside
@@ -77,13 +77,15 @@ export async function POST(request: Request) {
   const trialFields = role === 'trial' ? freshTrialWindow() : {}
 
   // ── Welcome-email plan ─────────────────────────────────────────────────────
-  // If the new athlete has a real-looking email, we pre-mint their passwordless
-  // magic token now so we can email them a ready-to-use login link. A bogus /
-  // placeholder email means no token and no send ("nếu email đó không tồn tại
-  // thì không gửi gì hết"); the token can still be minted lazily later via
-  // /api/magic-link.
+  // Send a welcome email when the address looks real (a bogus / placeholder
+  // email means no send — "nếu email đó không tồn tại thì không gửi gì hết").
+  // Staff (coach/admin) log in at /login with email+password, so they get NO
+  // magic token. Athletes (user/trial) get a pre-minted passwordless magic
+  // token so we can email them a ready-to-use login link; that token can also
+  // be minted lazily later via /api/magic-link.
+  const isStaffAccount = role === 'coach' || role === 'admin'
   const willEmail = looksLikeEmail(email)
-  const magicToken = willEmail ? generateMagicToken(full_name ?? email) : null
+  const magicToken = willEmail && !isStaffAccount ? generateMagicToken(full_name ?? email) : null
 
   // ── Step 1: Create auth user (bypasses signup restrictions) ───────────────
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -134,17 +136,25 @@ export async function POST(request: Request) {
   }
 
   // ── Step 3: Send the welcome email (best-effort, never blocks creation) ─────
-  // The athlete gets a note that their account is ready plus their passwordless
-  // magic link. A failure here must NOT fail the request — the account already
-  // exists. We surface the outcome in `emailed` so the UI can hint at it.
+  // Staff get a login-page link + their email/temp-password; athletes get their
+  // passwordless magic link. A failure here must NOT fail the request — the
+  // account already exists. We surface the outcome in `emailed` for the UI.
   let emailed = false
-  if (willEmail && magicToken) {
+  if (willEmail) {
     const origin = new URL(request.url).origin
-    const { subject, html } = buildWelcomeEmail({
-      fullName: full_name ?? null,
-      loginUrl: `${origin}/p/${magicToken}`,
-      siteUrl:  origin,
-    })
+    const { subject, html } = isStaffAccount
+      ? buildStaffWelcomeEmail({
+          fullName: full_name ?? null,
+          email,
+          password,
+          loginUrl: `${origin}/login`,
+          isAdmin:  role === 'admin',
+        })
+      : buildWelcomeEmail({
+          fullName: full_name ?? null,
+          loginUrl: `${origin}/p/${magicToken}`,
+          siteUrl:  origin,
+        })
     const result = await sendEmail({ to: email, subject, html })
     emailed = result.sent
     if (!result.sent && result.error) {
