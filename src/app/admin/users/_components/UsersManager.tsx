@@ -38,6 +38,8 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
   const [newRole, setNewRole] = useState<ManagedRole>('user')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  // Thông báo sau khi tạo tài khoản (gồm cả trạng thái gửi email mời).
+  const [createNotice, setCreateNotice] = useState<string | null>(null)
 
   // Chỉnh sửa
   const [editName, setEditName] = useState('')
@@ -106,6 +108,12 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
       const data = await res.json()
       setUsers(prev => [data.profile, ...prev])
       setCreateOpen(false)
+      // Cho HLV biết email mời đã được gửi hay chưa.
+      setCreateNotice(
+        data.emailed
+          ? `Đã tạo tài khoản và gửi email link đăng nhập tới ${data.profile.email}.`
+          : 'Đã tạo tài khoản. (Chưa gửi được email link đăng nhập — kiểm tra email học viên hoặc cấu hình gửi mail.)',
+      )
       setNewEmail('')
       setNewPassword('')
       setNewName('')
@@ -281,6 +289,21 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
           Thêm Học viên
         </Button>
       </div>
+
+      {/* Thông báo sau khi tạo tài khoản (gồm trạng thái gửi email mời) */}
+      {createNotice && (
+        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-herb/30 bg-herb/5 px-4 py-3 text-sm text-ink/80">
+          <span>{createNotice}</span>
+          <button
+            type="button"
+            onClick={() => setCreateNotice(null)}
+            className="shrink-0 text-ink/40 hover:text-ink/70"
+            aria-label="Đóng thông báo"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Bảng học viên
            Single scroll container: overflow-x-auto + min-w on the table forces

@@ -7,6 +7,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireStaff } from '@/lib/auth'
 import { freshTrialWindow } from '@/lib/trial'
+import { generateMagicToken } from '@/lib/guestToken'
+import { sendEmail, buildWelcomeEmail, looksLikeEmail } from '@/lib/email'
 
 // ── Shared admin-client factory (module-scoped helper, server-only) ──────────
 // Defined here rather than imported from lib so the env-var reads stay inside
@@ -74,6 +76,15 @@ export async function POST(request: Request) {
   // Trial accounts start with a fresh 5-hour activation window.
   const trialFields = role === 'trial' ? freshTrialWindow() : {}
 
+  // ── Welcome-email plan ─────────────────────────────────────────────────────
+  // If the new athlete has a real-looking email, we pre-mint their passwordless
+  // magic token now so we can email them a ready-to-use login link. A bogus /
+  // placeholder email means no token and no send ("nếu email đó không tồn tại
+  // thì không gửi gì hết"); the token can still be minted lazily later via
+  // /api/magic-link.
+  const willEmail = looksLikeEmail(email)
+  const magicToken = willEmail ? generateMagicToken(full_name ?? email) : null
+
   // ── Step 1: Create auth user (bypasses signup restrictions) ───────────────
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -102,6 +113,7 @@ export async function POST(request: Request) {
         full_name:  full_name ?? null,
         role,
         created_by: createdBy,
+        ...(magicToken ? { magic_token: magicToken } : {}),
         ...trialFields,
       },
       { onConflict: 'id', ignoreDuplicates: false },
@@ -121,10 +133,29 @@ export async function POST(request: Request) {
     )
   }
 
-  // ── Step 3: Return the confirmed profile row ───────────────────────────────
+  // ── Step 3: Send the welcome email (best-effort, never blocks creation) ─────
+  // The athlete gets a note that their account is ready plus their passwordless
+  // magic link. A failure here must NOT fail the request — the account already
+  // exists. We surface the outcome in `emailed` so the UI can hint at it.
+  let emailed = false
+  if (willEmail && magicToken) {
+    const origin = new URL(request.url).origin
+    const { subject, html } = buildWelcomeEmail({
+      fullName: full_name ?? null,
+      loginUrl: `${origin}/p/${magicToken}`,
+      siteUrl:  origin,
+    })
+    const result = await sendEmail({ to: email, subject, html })
+    emailed = result.sent
+    if (!result.sent && result.error) {
+      console.error('[POST /api/admin/users] Welcome email failed:', result.error)
+    }
+  }
+
+  // ── Step 4: Return the confirmed profile row ───────────────────────────────
   // The frontend adds this directly to the users list — the row is guaranteed
   // committed because .select().single() waited for the write to complete.
-  return NextResponse.json({ profile }, { status: 201 })
+  return NextResponse.json({ profile, emailed }, { status: 201 })
 }
 
 /** GET /api/admin/users — list profiles (admins: all; coaches: their students) */
