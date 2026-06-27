@@ -32,12 +32,12 @@ type ProgramWithJoins = UserProgram & {
 
 type SessionRow = Omit<WorkoutSession, 'sets'> & { sets: { count: number }[] }
 
-interface GridCell { setId: string | null; kg: string; reps: string }
+interface GridCell { setId: string | null; kg: string; reps: string; rir: string }
 type GridState = Record<string, GridCell>
 
 interface ActiveSet {
   id: string; exercise_id: string; set_number: number
-  weight_kg: number | null; actual_reps: number | null
+  weight_kg: number | null; actual_reps: number | null; rir: number | null
 }
 type SaveStatus = 'idle' | 'saving' | 'error'
 
@@ -87,6 +87,7 @@ function buildInitialGrid(sets: WorkoutSet[]): GridState {
       setId: s.id,
       kg:   s.weight_kg   != null ? String(s.weight_kg)   : '',
       reps: s.actual_reps != null ? String(s.actual_reps) : '',
+      rir:  s.rir         != null ? String(s.rir)         : '',
     }
   }
   return g
@@ -197,7 +198,7 @@ export function GuestTrainingView({
         setGrid(() => buildInitialGrid(sets))
         setActiveSets(sets.map(s => ({
           id: s.id, exercise_id: s.exercise_id, set_number: s.set_number,
-          weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null,
+          weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null, rir: s.rir ?? null,
         })))
         setActiveSession(session)
       })
@@ -223,7 +224,7 @@ export function GuestTrainingView({
       .filter(s => _defaultDayExIds.has(s.exercise_id))
       .map(s => ({
         id: s.id, exercise_id: s.exercise_id, set_number: s.set_number,
-        weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null,
+        weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null, rir: s.rir ?? null,
       }))
   })
   const [cellSave,      setCellSave]      = useState<Record<string, SaveStatus>>({})
@@ -337,7 +338,7 @@ export function GuestTrainingView({
         setGrid(() => initialGrid)
         setActiveSets(daySets.map(s => ({
           id: s.id, exercise_id: s.exercise_id, set_number: s.set_number,
-          weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null,
+          weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null, rir: s.rir ?? null,
         })))
         setActiveSession(session)
         setSessionCompleted(true)
@@ -427,23 +428,24 @@ export function GuestTrainingView({
     try {
       const weightKg   = cell.kg   ? parseFloat(cell.kg)    : null
       const actualReps = cell.reps ? parseInt(cell.reps, 10) : null
+      const rir        = cell.rir  ? parseInt(cell.rir, 10)  : null
 
       if (cell.setId) {
         const r = await fetch(`${apiBase}/sets?set_id=${cell.setId}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ weight_kg: weightKg, actual_reps: actualReps }),
+          body: JSON.stringify({ weight_kg: weightKg, actual_reps: actualReps, rir }),
         })
         if (!r.ok) throw new Error('patch_failed')
         const patchedId = cell.setId
         setActiveSets(prev => prev.map(s =>
-          s.id === patchedId ? { ...s, weight_kg: weightKg, actual_reps: actualReps } : s,
+          s.id === patchedId ? { ...s, weight_kg: weightKg, actual_reps: actualReps, rir } : s,
         ))
       } else {
         const r = await fetch(`${apiBase}/sets`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             exercise_id: exerciseId, set_number: setNum,
-            actual_reps: actualReps ?? 0, weight_kg: weightKg, is_warmup: false,
+            actual_reps: actualReps ?? 0, weight_kg: weightKg, rir, is_warmup: false,
           }),
         })
         if (!r.ok) throw new Error('post_failed')
@@ -452,7 +454,7 @@ export function GuestTrainingView({
           setGrid(prev => ({ ...prev, [key]: { ...prev[key], setId: payload.set!.id } }))
           setActiveSets(prev => [...prev, {
             id: payload.set!.id, exercise_id: exerciseId, set_number: setNum,
-            weight_kg: weightKg, actual_reps: actualReps,
+            weight_kg: weightKg, actual_reps: actualReps, rir,
           }])
         }
       }
@@ -474,9 +476,9 @@ export function GuestTrainingView({
     }
   }
 
-  function updateCell(exerciseId: string, setNum: number, field: 'kg' | 'reps', value: string) {
+  function updateCell(exerciseId: string, setNum: number, field: 'kg' | 'reps' | 'rir', value: string) {
     const key = `${exerciseId}:${setNum}`
-    setGrid(prev => ({ ...prev, [key]: { ...(prev[key] ?? { setId: null, kg: '', reps: '' }), [field]: value } }))
+    setGrid(prev => ({ ...prev, [key]: { ...(prev[key] ?? { setId: null, kg: '', reps: '', rir: '' }), [field]: value } }))
     setCellSave(prev => ({ ...prev, [key]: 'idle' }))
     const t = debounceMap.current.get(key)
     if (t) clearTimeout(t)
@@ -801,6 +803,7 @@ export function GuestTrainingView({
           onCellBlur={(exId, setNum) => flushCell(exId, setNum)}
           overloadSuggestions={overloadSuggestions}
           isOverloadWeek={isOverloadWeek}
+          isPeaking={isPeaking}
           scopeKey={`${activeWeek}:${activeDayId ?? 'all'}`}
           legendLabel={`${sortedRows.length} bài tập${hasSplit && activeDayId ? ` · ${phaseSplitDays.find(d => d.id === activeDayId)?.label ?? ''}` : ''}`}
           sessionCompleted={sessionCompleted}

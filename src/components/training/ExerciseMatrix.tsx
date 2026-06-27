@@ -1,16 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { cn } from '@/lib/utils'
+import { computeIntraSessionGuidance, firstSetTargetHint } from '@/lib/autoregulation'
 import type { PhaseExercise } from '@/types'
 
 // ─── Shared matrix types (used by Coach + Guest training views) ───────────────
 
-export interface GridCell { setId: string | null; kg: string; reps: string }
+export interface GridCell { setId: string | null; kg: string; reps: string; rir: string }
 export type GridState = Record<string, GridCell>
 export interface ActiveSetLite {
   id: string; exercise_id: string; set_number: number
-  weight_kg: number | null; actual_reps: number | null
+  weight_kg: number | null; actual_reps: number | null; rir: number | null
 }
 export type SaveStatus = 'idle' | 'saving' | 'error'
 
@@ -25,10 +26,12 @@ interface ExerciseMatrixProps {
   cellSave:            Record<string, SaveStatus>
   exerciseNotes:       Record<string, string>
   onNoteChange:        (exerciseId: string, value: string) => void
-  onCellChange:        (exerciseId: string, setNum: number, field: 'kg' | 'reps', value: string) => void
+  onCellChange:        (exerciseId: string, setNum: number, field: 'kg' | 'reps' | 'rir', value: string) => void
   onCellBlur:          (exerciseId: string, setNum: number) => void
   overloadSuggestions: Record<string, string>
   isOverloadWeek:      boolean
+  /** Peaking/taper week — suppresses the rep-range autoregulation guidance. */
+  isPeaking:           boolean
   /** Resets mobile focus index when the active week/day changes. */
   scopeKey:            string
   legendLabel:         string
@@ -52,9 +55,10 @@ function getCell(grid: GridState, activeSets: ActiveSetLite[], exerciseId: strin
       setId: saved.id,
       kg:   saved.weight_kg   != null ? String(saved.weight_kg)   : '',
       reps: saved.actual_reps != null ? String(saved.actual_reps) : '',
+      rir:  saved.rir         != null ? String(saved.rir)         : '',
     }
   }
-  return { setId: null, kg: '', reps: '' }
+  return { setId: null, kg: '', reps: '', rir: '' }
 }
 
 function cleanKg(v: string)   { return v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1') }
@@ -67,13 +71,45 @@ function targetLabelOf(pe: PhaseExercise): string {
     : `${t} × ${pe.target_rep_min}–${pe.target_rep_max}`
 }
 
+/**
+ * Intra-session load guidance for one exercise (Eric Helms), derived from the
+ * first working set vs. the prescription. Returns null when guidance shouldn't
+ * show: AMRAP, peaking weeks, or before set 1 has any reps entered.
+ */
+function guidanceFor(
+  pe: PhaseExercise,
+  grid: GridState,
+  activeSets: ActiveSetLite[],
+  isPeaking: boolean,
+) {
+  if (pe.is_amrap || isPeaking) return null
+  const s1 = getCell(grid, activeSets, pe.exercise_id, 1)
+  if (!s1.reps) return null
+  return computeIntraSessionGuidance({
+    firstSetReps:     parseInt(s1.reps, 10),
+    firstSetWeightKg: s1.kg  ? parseFloat(s1.kg)   : null,
+    firstSetRir:      s1.rir ? parseInt(s1.rir, 10) : null,
+    repMin:           pe.target_rep_min,
+    repMax:           pe.target_rep_max,
+    rirTarget:        pe.rir_target,
+  })
+}
+
+/** Tailwind classes + icon for a guidance status. */
+function guidanceStyle(g: NonNullable<ReturnType<typeof guidanceFor>>) {
+  const box = g.status === 'in_range' ? 'border-herb/25 bg-herb/6' : 'border-amber/30 bg-amber/8'
+  const text = g.status === 'in_range' ? 'text-herb-deep' : 'text-amber'
+  const icon = g.status === 'too_light' ? '⬆️' : g.status === 'too_heavy' ? '⬇️' : g.progressReady ? '🎯' : '✓'
+  return { box, text, icon }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ExerciseMatrix(props: ExerciseMatrixProps) {
   const {
     rows, grid, activeSets, cellSave, exerciseNotes,
     onNoteChange, onCellChange, onCellBlur,
-    overloadSuggestions, isOverloadWeek, scopeKey, legendLabel,
+    overloadSuggestions, isOverloadWeek, isPeaking, scopeKey, legendLabel,
     sessionCompleted, sessionCreating, anySaving, anyError,
     onSaveSession, saveDisabled,
   } = props
@@ -142,6 +178,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
       <div className="hidden md:block rounded-2xl border border-ink/10 bg-white overflow-hidden shadow-sm">
         <div className="px-4 py-2 border-b border-ink/6 flex items-center gap-3">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-ink/35">{legendLabel}</span>
+          <span className="text-[10px] text-amber/70">Nhập RIR mỗi hiệp để tự điều chỉnh tải</span>
           <span className="ml-auto flex items-center gap-2.5 text-[10px] text-ink/30">
             {statusChips}
             <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded border border-amber/40 bg-amber/10" />Đang nhập</span>
@@ -150,7 +187,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="border-separate border-spacing-0" style={{ minWidth: '780px', width: '100%' }}>
+          <table className="border-separate border-spacing-0" style={{ minWidth: '1080px', width: '100%' }}>
             <thead>
               <tr>
                 <th className="sticky left-0 z-20 border-b border-r border-ink/8 bg-paper px-2.5 py-2.5 text-left" style={{ width: 44 }}>
@@ -163,11 +200,12 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                   <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30">Mục tiêu</span>
                 </th>
                 {Array.from({ length: MAX_SETS }, (_, i) => (
-                  <th key={i} className="border-b border-r border-ink/8 bg-paper/80 px-2 py-2 text-center" style={{ width: 96 }}>
+                  <th key={i} className="border-b border-r border-ink/8 bg-paper/80 px-2 py-2 text-center" style={{ width: 134 }}>
                     <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30 block">Hiệp {i + 1}</span>
-                    <div className="flex justify-center gap-2 mt-0.5">
-                      <span className="text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
-                      <span className="text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
+                    <div className="flex justify-center gap-1.5 mt-0.5">
+                      <span className="w-[40px] text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
+                      <span className="w-[40px] text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
+                      <span className="w-[32px] text-[8px] text-amber/70 font-mono font-semibold">RIR</span>
                     </div>
                   </th>
                 ))}
@@ -184,8 +222,13 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                 const targetSets  = pe.target_sets ?? 3
                 const rowTint  = rowIdx % 2 === 1
                 const stickyBg = rowTint ? 'bg-[#F0EBE1]' : 'bg-paper'
+                const guidance = guidanceFor(pe, grid, activeSets, isPeaking)
+                const targetTip = !pe.is_amrap && !isPeaking
+                  ? firstSetTargetHint(pe.target_rep_min, pe.target_rep_max, pe.rir_target)
+                  : undefined
                 return (
-                  <tr key={pe.id}>
+                  <Fragment key={pe.id}>
+                  <tr>
                     <td className={cn('sticky left-0 z-10 border-b border-r border-ink/7 px-2.5 py-3', stickyBg)} style={{ width: 44 }}>
                       <span className="font-sans font-bold text-xs text-ink/60">{pe.order_label ?? '—'}</span>
                     </td>
@@ -202,7 +245,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                         <p className="mt-1.5 text-[10px] text-ink/55 leading-snug whitespace-pre-line">📝 {pe.notes}</p>
                       )}
                     </td>
-                    <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')} style={{ width: 96 }}>
+                    <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')} style={{ width: 96 }} title={targetTip}>
                       <p className="font-mono text-[11px] text-ink/65 whitespace-nowrap">{targetLabelOf(pe)}</p>
                       {pe.rir_target != null && !pe.is_amrap && <p className="font-mono text-[10px] text-ink/35">RIR {pe.rir_target}</p>}
                       {pe.target_percentage_1rm != null && <p className="font-mono text-[10px] text-danger/55 font-semibold">{pe.target_percentage_1rm}% 1RM</p>}
@@ -216,8 +259,8 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       const setDone    = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
                       const overloadKg = isOverloadWeek ? overloadSuggestions[cellKey] : undefined
                       return (
-                        <td key={si} className={cn('border-b border-r border-ink/7 px-1.5 py-2', rowTint ? 'bg-ink/[0.018]' : '', !isTarget && 'opacity-30')} style={{ width: 96 }}>
-                          <div className="flex items-center gap-1">
+                        <td key={si} className={cn('border-b border-r border-ink/7 px-1.5 py-2', rowTint ? 'bg-ink/[0.018]' : '', !isTarget && 'opacity-30')} style={{ width: 134 }}>
+                          <div className="flex items-center gap-1.5">
                             <input
                               type="text" inputMode="decimal"
                               placeholder={overloadKg ? `→${overloadKg}` : '—'}
@@ -226,7 +269,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               onChange={e => onCellChange(exerciseId, setNum, 'kg', cleanKg(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
                               className={cn(
-                                'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
                                 setDone ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
                                   : cell.kg ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
                                   : 'bg-bone border-[#C7BCA4] text-ink/45',
@@ -243,13 +286,29 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               onChange={e => onCellChange(exerciseId, setNum, 'reps', cleanReps(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
                               className={cn(
-                                'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors placeholder:text-ink/30',
+                                'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors placeholder:text-ink/30',
                                 setDone ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
                                   : cell.reps ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
                                   : 'bg-bone border-[#C7BCA4] text-ink/45',
                                 ss === 'saving' && 'border-amber animate-pulse',
                                 ss === 'error'  && 'border-danger/60 bg-danger/5',
                                 'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
+                              )}
+                            />
+                            <input
+                              type="text" inputMode="numeric" placeholder="—"
+                              aria-label={`${exName} hiệp ${setNum} RIR`}
+                              title="RIR — số reps còn dự trữ khi dừng hiệp"
+                              value={cell.rir}
+                              onChange={e => onCellChange(exerciseId, setNum, 'rir', cleanReps(e.target.value))}
+                              onBlur={() => onCellBlur(exerciseId, setNum)}
+                              className={cn(
+                                'h-8 w-[32px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors placeholder:text-ink/25',
+                                cell.rir ? 'bg-amber/8 border-amber/40 text-amber font-semibold'
+                                  : 'bg-bone/60 border-[#D8CDB6] text-ink/40',
+                                ss === 'saving' && 'border-amber animate-pulse',
+                                ss === 'error'  && 'border-danger/60 bg-danger/5',
+                                'hover:border-amber/60 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                               )}
                             />
                           </div>
@@ -266,6 +325,22 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       />
                     </td>
                   </tr>
+
+                  {/* ── Intra-session load guidance (Eric Helms) ── */}
+                  {guidance && (() => {
+                    const gs = guidanceStyle(guidance)
+                    return (
+                      <tr>
+                        <td colSpan={3 + MAX_SETS + 1} className={cn('border-b border-ink/7 px-3 py-1.5', rowTint ? 'bg-ink/[0.018]' : '')}>
+                          <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-1.5', gs.box)}>
+                            <span className="text-sm leading-none mt-0.5 shrink-0">{gs.icon}</span>
+                            <p className={cn('text-[11px] leading-relaxed', gs.text)}>{guidance.message}</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })()}
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -290,6 +365,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
           onCellBlur={onCellBlur}
           overloadSuggestions={overloadSuggestions}
           isOverloadWeek={isOverloadWeek}
+          isPeaking={isPeaking}
           visibleSetCount={visibleSetCount}
           revealSet={(exId, current) => setExtraVisible(prev => ({ ...prev, [exId]: Math.min(MAX_SETS, current + 1) }))}
           statusChips={statusChips}
@@ -313,10 +389,11 @@ interface MobileFocusProps {
   cellSave:            Record<string, SaveStatus>
   exerciseNotes:       Record<string, string>
   onNoteChange:        (exerciseId: string, value: string) => void
-  onCellChange:        (exerciseId: string, setNum: number, field: 'kg' | 'reps', value: string) => void
+  onCellChange:        (exerciseId: string, setNum: number, field: 'kg' | 'reps' | 'rir', value: string) => void
   onCellBlur:          (exerciseId: string, setNum: number) => void
   overloadSuggestions: Record<string, string>
   isOverloadWeek:      boolean
+  isPeaking:           boolean
   visibleSetCount:     (pe: PhaseExercise) => number
   revealSet:           (exerciseId: string, current: number) => void
   statusChips:         React.ReactNode
@@ -387,10 +464,11 @@ function MobileFocus(p: MobileFocusProps) {
         )}
 
         {/* column labels */}
-        <div className="flex items-center gap-3 px-1">
-          <span className="w-14 shrink-0" />
+        <div className="flex items-center gap-2.5 px-1">
+          <span className="w-12 shrink-0" />
           <span className="flex-1 text-center text-[10px] font-bold uppercase tracking-widest text-ink/45">Kg</span>
           <span className="flex-1 text-center text-[10px] font-bold uppercase tracking-widest text-ink/45">Reps</span>
+          <span className="w-16 shrink-0 text-center text-[10px] font-bold uppercase tracking-widest text-amber/70">RIR</span>
         </div>
 
         {/* set rows — big touch targets */}
@@ -403,8 +481,8 @@ function MobileFocus(p: MobileFocusProps) {
             const setDone    = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
             const overloadKg = p.isOverloadWeek ? p.overloadSuggestions[cellKey] : undefined
             return (
-              <div key={si} className="flex items-center gap-3">
-                <span className="w-14 shrink-0 text-sm font-bold text-ink/45">Hiệp {setNum}</span>
+              <div key={si} className="flex items-center gap-2.5">
+                <span className="w-12 shrink-0 text-sm font-bold text-ink/45">Hiệp {setNum}</span>
                 <input
                   type="text" inputMode="decimal"
                   placeholder={overloadKg ? `→${overloadKg}` : 'Kg'}
@@ -413,7 +491,7 @@ function MobileFocus(p: MobileFocusProps) {
                   onChange={e => p.onCellChange(exerciseId, setNum, 'kg', cleanKg(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
                   className={cn(
-                    'flex-1 min-w-0 py-3 px-4 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums',
+                    'flex-1 min-w-0 py-3 px-3 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums',
                     setDone ? 'bg-herb-wash border-herb text-herb-deep'
                       : cell.kg ? 'bg-bone border-[#C7BCA4] text-ink'
                       : 'bg-bone border-[#C7BCA4] text-ink/70',
@@ -430,10 +508,25 @@ function MobileFocus(p: MobileFocusProps) {
                   onChange={e => p.onCellChange(exerciseId, setNum, 'reps', cleanReps(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
                   className={cn(
-                    'flex-1 min-w-0 py-3 px-4 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums placeholder:text-ink/30 placeholder:font-medium',
+                    'flex-1 min-w-0 py-3 px-3 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums placeholder:text-ink/30 placeholder:font-medium',
                     setDone ? 'bg-herb-wash border-herb text-herb-deep'
                       : cell.reps ? 'bg-bone border-[#C7BCA4] text-ink'
                       : 'bg-bone border-[#C7BCA4] text-ink/70',
+                    ss === 'saving' && 'border-amber animate-pulse',
+                    ss === 'error'  && 'border-danger/60 bg-danger/5',
+                    'focus:border-amber focus:ring-[3px] focus:ring-amber/12',
+                  )}
+                />
+                <input
+                  type="text" inputMode="numeric" placeholder="RIR"
+                  aria-label={`${exName} hiệp ${setNum} RIR`}
+                  value={cell.rir}
+                  onChange={e => p.onCellChange(exerciseId, setNum, 'rir', cleanReps(e.target.value))}
+                  onBlur={() => p.onCellBlur(exerciseId, setNum)}
+                  className={cn(
+                    'w-16 shrink-0 py-3 px-2 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums placeholder:text-ink/25 placeholder:font-medium',
+                    cell.rir ? 'bg-amber/8 border-amber/40 text-amber'
+                      : 'bg-bone/60 border-[#D8CDB6] text-ink/50',
                     ss === 'saving' && 'border-amber animate-pulse',
                     ss === 'error'  && 'border-danger/60 bg-danger/5',
                     'focus:border-amber focus:ring-[3px] focus:ring-amber/12',
@@ -443,6 +536,19 @@ function MobileFocus(p: MobileFocusProps) {
             )
           })}
         </div>
+
+        {/* ── Intra-session load guidance (Eric Helms) ── */}
+        {(() => {
+          const guidance = guidanceFor(pe, p.grid, p.activeSets, p.isPeaking)
+          if (!guidance) return null
+          const gs = guidanceStyle(guidance)
+          return (
+            <div className={cn('flex items-start gap-2 rounded-xl border px-3.5 py-2.5', gs.box)}>
+              <span className="text-base leading-none mt-0.5 shrink-0">{gs.icon}</span>
+              <p className={cn('text-xs leading-relaxed', gs.text)}>{guidance.message}</p>
+            </div>
+          )
+        })()}
 
         {/* + add set */}
         {visible < MAX_SETS && (
