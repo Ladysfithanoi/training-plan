@@ -600,6 +600,41 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   )
   const maxMuscleSets   = weeklyVolumeByMuscle.reduce((m, p) => Math.max(m, p.sets), 0)
 
+  // ── Per-SESSION volume by muscle group (một buổi tập) ─────────────────────────
+  /**
+   * Same fractional-credit model as weeklyVolumeByMuscle, but scoped to a single
+   * buổi tập rather than the whole week.
+   *
+   * Newest hypertrophy research converges on a per-session ceiling: more than
+   * ~11 working sets for one muscle group in a single workout yields diminishing
+   * (and eventually negative) returns — the extra volume becomes junk that can
+   * blunt the growth stimulus. We flag any group over the cap so the coach can
+   * redistribute it to another day.
+   *
+   * Scope:
+   *   • Split configured → visibleExercises is exactly the active day's bài tập,
+   *     which IS the session — sum directly (no frequency multiplier).
+   *   • No split         → the phase is one repeated session; scopedExercises is
+   *     that single session, also summed directly.
+   */
+  const SESSION_SET_CAP = 11
+  const sessionVolumeByMuscle = (() => {
+    const map = new Map<string, number>()
+    for (const pe of visibleExercises) {
+      const patternName   = pe.exercise.movement_pattern?.name ?? ''
+      const exerciseName  = pe.exercise.name ?? ''
+      const sessionSets   = pe.target_sets ?? 0
+      const contributions = getMuscleContributions(patternName, exerciseName)
+      for (const [muscle, fraction] of Object.entries(contributions)) {
+        map.set(muscle, (map.get(muscle) ?? 0) + sessionSets * fraction)
+      }
+    }
+    return Array.from(map.entries())
+      .map(([name, sets]) => ({ name, sets: Math.round(sets * 10) / 10 }))
+      .sort((a, b) => b.sets - a.sets)
+  })()
+  const overloadedMuscles = sessionVolumeByMuscle.filter(m => m.sets > SESSION_SET_CAP)
+
   /**
    * True when the selected phase is configured for Strength / Peaking / Taper work.
    *
@@ -2328,6 +2363,43 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                     <span className="text-[9px] text-ink/30">{label}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ════════════════════════════════════════════════════════════════ */}
+          {/* ── SESSION OVERLOAD WARNING ───────────────────────────────── */}
+          {/* Cảnh báo khi một nhóm cơ vượt quá 11 hiệp trong một buổi tập. */}
+          {/* ════════════════════════════════════════════════════════════════ */}
+          {overloadedMuscles.length > 0 && !loading && (
+            <div className="rounded-xl border border-amber/40 bg-amber/8 px-4 py-3">
+              <div className="flex items-start gap-2.5">
+                <span className="text-amber text-base leading-none mt-0.5">⚠</span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-amber">
+                    Quá tải buổi tập
+                    {splitType && activeDay ? ` — ${activeDay.label}` : ''}
+                  </p>
+                  <p className="text-[11px] text-ink/60 mt-1 leading-relaxed">
+                    Nghiên cứu mới khuyến nghị mỗi nhóm cơ không quá{' '}
+                    <span className="font-semibold text-ink/75">{SESSION_SET_CAP} hiệp</span>{' '}
+                    trong một buổi — vượt ngưỡng có thể làm giảm hiệu quả tăng cơ.
+                    Hãy cân nhắc giảm bớt hoặc chuyển sang buổi khác:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {overloadedMuscles.map(({ name, sets }) => (
+                      <span
+                        key={name}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-amber/40 bg-white px-2.5 py-0.5 text-[11px] font-medium text-amber"
+                      >
+                        {name}
+                        <span className="font-mono font-bold tabular-nums">
+                          {formatSets(sets)} hiệp
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
