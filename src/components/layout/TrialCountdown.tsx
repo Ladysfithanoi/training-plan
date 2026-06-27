@@ -40,9 +40,11 @@ export function TrialCountdown({ expiresAt }: TrialCountdownProps) {
     return () => clearInterval(id)
   }, [target, router])
 
-  const expired = remaining <= 0
+  // No expiry set yet → the 5-hour clock hasn't started (begins on first login).
+  const pending = !expiresAt
+  const expired = !pending && remaining <= 0
   // Under 30 minutes → urgent red styling.
-  const urgent = !expired && remaining < 30 * 60 * 1000
+  const urgent = !pending && !expired && remaining < 30 * 60 * 1000
 
   return (
     <div
@@ -57,14 +59,18 @@ export function TrialCountdown({ expiresAt }: TrialCountdownProps) {
       <p className={`text-[10px] font-bold uppercase tracking-widest ${expired || urgent ? 'text-danger' : 'text-amber'}`}>
         Phiên trải nghiệm
       </p>
-      {expired ? (
+      {pending ? (
+        <p className="mt-0.5 text-sm font-bold text-amber">Chưa bắt đầu</p>
+      ) : expired ? (
         <p className="mt-0.5 text-sm font-bold text-danger">Đã hết hạn</p>
       ) : (
         <p className={`mt-0.5 font-mono text-lg font-bold tabular-nums ${urgent ? 'text-danger' : 'text-ink'}`}>
           {format(remaining)}
         </p>
       )}
-      <p className="mt-0.5 text-[10px] text-ink/45 leading-tight">Thời gian còn lại để trải nghiệm</p>
+      <p className="mt-0.5 text-[10px] text-ink/45 leading-tight">
+        {pending ? 'Đồng hồ 5 giờ bắt đầu khi bạn đăng nhập lần đầu' : 'Thời gian còn lại để trải nghiệm'}
+      </p>
     </div>
   )
 }

@@ -369,11 +369,26 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
                       </span>
                       {user.role === 'trial' && (() => {
                         const st = trialState(user)
-                        const active = st === 'active'
+                        // pending = created but not logged in yet (clock not started)
+                        const tone = st === 'active'
+                          ? 'text-herb'
+                          : st === 'pending'
+                            ? 'text-amber'
+                            : 'text-danger'
+                        const dot = st === 'active'
+                          ? 'bg-herb'
+                          : st === 'pending'
+                            ? 'bg-amber'
+                            : 'bg-danger'
+                        const label = st === 'active'
+                          ? 'Active'
+                          : st === 'pending'
+                            ? 'Chờ đăng nhập'
+                            : 'Deactive'
                         return (
-                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${active ? 'text-herb' : 'text-danger'}`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-herb' : 'bg-danger'}`} />
-                            {active ? 'Active' : 'Deactive'}
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${tone}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                            {label}
                           </span>
                         )
                       })()}

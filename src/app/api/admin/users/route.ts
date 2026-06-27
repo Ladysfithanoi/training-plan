@@ -6,7 +6,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireStaff } from '@/lib/auth'
-import { freshTrialWindow } from '@/lib/trial'
+import { pendingTrialWindow } from '@/lib/trial'
 import { generateMagicToken } from '@/lib/guestToken'
 import { sendEmail, buildWelcomeEmail, buildStaffWelcomeEmail, looksLikeEmail } from '@/lib/email'
 
@@ -73,8 +73,10 @@ export async function POST(request: Request) {
   if (!['user', 'coach', 'admin', 'trial'].includes(role)) role = 'user'
   const createdBy: string | null = isAdmin ? null : caller.id
 
-  // Trial accounts start with a fresh 5-hour activation window.
-  const trialFields = role === 'trial' ? freshTrialWindow() : {}
+  // Trial accounts start switched ON but with the 5-hour clock NOT yet running.
+  // The window begins counting from the tester's FIRST login (see
+  // /api/auth/login), so preparing the account in advance doesn't burn the time.
+  const trialFields = role === 'trial' ? pendingTrialWindow() : {}
 
   // ── Welcome-email plan ─────────────────────────────────────────────────────
   // Send a welcome email when the address looks real (a bogus / placeholder

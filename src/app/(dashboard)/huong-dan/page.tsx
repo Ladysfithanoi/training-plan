@@ -36,6 +36,16 @@ const COACH_BUILD_STEPS: Step[] = [
   { title: 'Kiểm tra & giao', desc: 'Xem lại “Tiến trình giai đoạn”, “Ma trận vùng Reps” và “Cấu trúc Phân kỳ” để chắc chắn khối tập hợp lý, sau đó giao cho học viên ở “Danh sách Học viên” → “Giáo án”.' },
 ]
 
+// In-session RIR autoregulation — applies to anyone logging workouts.
+const RIR_AUTOREG_STEPS: Step[] = [
+  { title: 'Nhập RIR cho mỗi hiệp', desc: 'Bảng ghi buổi tập có thêm ô “RIR” bên cạnh Kg và Lần. RIR là số reps bạn còn gắng được khi dừng hiệp (RIR 2 = còn ~2 reps). Nhập RIR để app theo dõi đúng độ nặng thực tế.' },
+  { title: 'Hiệp 1 — chọn tạ đúng vùng', desc: 'Chọn mức tạ bạn nghĩ đạt khoảng giữa hoặc cận dưới dải rep ở đúng RIR mục tiêu (xem cột “Mục tiêu”), rồi dừng đúng RIR đó — kể cả khi còn gắng được thêm.' },
+  { title: 'Trong dải → giữ nguyên tạ', desc: 'Nếu hiệp 1 nằm trong dải rep mục tiêu, giữ nguyên mức tạ cho các hiệp còn lại. Reps tụt dần ở các hiệp sau do mệt mỏi là bình thường, vẫn có tác dụng.' },
+  { title: 'Ngoài dải → app gợi ý chỉnh tạ', desc: 'Nếu hiệp 1 vượt hoặc hụt dải rep, dòng gợi ý ngay dưới bài tập sẽ đề xuất tăng/giảm khoảng 4% cho mỗi rep lệch khỏi dải — áp dụng cho các hiệp còn lại.' },
+  { title: 'Sẵn sàng tăng tạ', desc: 'Khi đạt đỉnh dải rep ở đúng RIR mục tiêu, app báo 🎯 — buổi sau hãy tăng mức tạ lên.' },
+  { title: 'Cho phép dao động', desc: 'Phong độ không phải lúc nào cũng tiến đều — có buổi hơi lùi là bình thường. Nhìn theo xu hướng nhiều tuần thay vì một buổi đơn lẻ.' },
+]
+
 const STUDENT_STEPS: Step[] = [
   { title: 'Xem chương trình', desc: 'Mở “Chương trình của tôi” để xem khối tập, các giai đoạn và bài tập HLV đã giao.' },
   { title: 'Ghi buổi tập', desc: 'Trong mỗi buổi, nhập số reps và mức tạ cho từng hiệp. Cột “Mục tiêu” cho biết reps & RIR cần đạt.' },
@@ -170,6 +180,15 @@ export default async function GuidePage() {
             <StepList steps={COACH_BUILD_STEPS} />
           </Accordion>
         )}
+
+        {/* In-session RIR autoregulation — relevant to everyone who logs sets */}
+        <Accordion title="Tự điều chỉnh tải trong buổi (RIR)">
+          <p className="text-sm text-ink/55 mb-4 leading-relaxed">
+            Theo phương pháp Eric Helms: dùng RIR để chọn và tinh chỉnh mức tạ ngay trong buổi tập.
+            Nhập RIR cho mỗi hiệp, app sẽ gợi ý giữ hay đổi tạ cho các hiệp tiếp theo.
+          </p>
+          <StepList steps={RIR_AUTOREG_STEPS} />
+        </Accordion>
 
         {/* Glossary */}
         <Accordion title="Thuật ngữ thường gặp">
