@@ -148,3 +148,134 @@ export function buildGuestSuggestion(survey: SessionSurvey): string {
   }
   return 'Cơ thể đang thích nghi rất tốt. Tuần sau duy trì mức tạ và thể tích hiện tại, tập trung tối ưu hóa chất lượng chuyển động.'
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Within-session (intra-session) load autoregulation — Eric Helms
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * The set-to-set load protocol applied DURING a workout (vs. the post-workout
+ * survey above which plans the next WEEK):
+ *
+ *   1. Hiệp 1 — chọn tạ ước đạt giữa/cận dưới dải rep ở mức RIR mục tiêu.
+ *   2. Dừng đúng RIR mục tiêu mỗi hiệp.
+ *   3. Nếu hiệp 1 nằm TRONG dải → giữ nguyên tạ; reps tụt dần là bình thường.
+ *   4. Nếu hiệp 1 NGOÀI dải → chỉnh tạ ~4% cho mỗi rep lệch khỏi dải.
+ *   5. Khi đạt đỉnh dải ở RIR mục tiêu → buổi sau tăng tạ.
+ *
+ * These are pure functions: no I/O, safe to import in both server and client.
+ */
+
+const PCT_PER_REP = 0.04   // ~4% load change per rep outside the target range
+
+/** Round a load to the nearest 0.5 kg (barbell-friendly). */
+function roundToHalfKg(kg: number): number {
+  return Math.round(kg * 2) / 2
+}
+
+/** Strip a trailing ".0" for display (40.0 → "40", 42.5 → "42.5"). */
+function fmtKg(kg: number): string {
+  return Number.isInteger(kg) ? String(kg) : kg.toFixed(1)
+}
+
+export type IntraSessionStatus = 'in_range' | 'too_light' | 'too_heavy'
+
+export interface IntraSessionGuidance {
+  status: IntraSessionStatus
+  /** Set-1 load, echoed for display. */
+  currentWeightKg: number | null
+  /** Load to use for the REMAINING sets this session (= current when in range). */
+  suggestedWeightKg: number | null
+  /** How many reps set 1 was outside the target range (0 when inside). */
+  repsOutOfRange: number
+  /** Hit the top of the range at/under the RIR target → increase load next session. */
+  progressReady: boolean
+  /** Vietnamese coach line shown live under the exercise. */
+  message: string
+}
+
+/**
+ * Pre-set advisory for choosing the load on set 1 (rule 1). Shown as a tooltip
+ * on the target cell before any set is logged.
+ */
+export function firstSetTargetHint(repMin: number, repMax: number, rirTarget: number): string {
+  const mid = Math.round((repMin + repMax) / 2)
+  return (
+    `Hiệp 1: chọn mức tạ bạn nghĩ đạt ~${mid} lần (giữa/cận dưới dải ${repMin}–${repMax}) ` +
+    `ở RIR ${rirTarget} — tức ~${mid + rirTarget}RM — rồi dừng đúng RIR ${rirTarget}.`
+  )
+}
+
+/**
+ * Evaluate the first working set against the prescription and recommend the load
+ * for the remaining sets (rules 3–5). Drives the live guidance line in the logger.
+ *
+ * Reps below the range ⇒ load too heavy ⇒ trim ~4%/rep short.
+ * Reps above the range ⇒ load too light ⇒ add ~4%/rep over (and flag next-session ↑).
+ * Reps inside the range ⇒ keep the load; flag ↑ only when set 1 lands at the very
+ * top of the range at/under the RIR target.
+ */
+export function computeIntraSessionGuidance(input: {
+  firstSetReps: number
+  firstSetWeightKg: number | null
+  firstSetRir: number | null
+  repMin: number
+  repMax: number
+  rirTarget: number
+}): IntraSessionGuidance {
+  const { firstSetReps, firstSetWeightKg: w, firstSetRir, repMin, repMax, rirTarget } = input
+
+  // ── Below range → too heavy → reduce ──────────────────────────────────────
+  if (firstSetReps < repMin) {
+    const under = repMin - firstSetReps
+    const suggested = w != null && w > 0 ? roundToHalfKg(w * (1 - PCT_PER_REP * under)) : null
+    return {
+      status: 'too_heavy',
+      currentWeightKg: w,
+      suggestedWeightKg: suggested,
+      repsOutOfRange: under,
+      progressReady: false,
+      message:
+        `Hiệp 1 đạt ${firstSetReps} lần — dưới dải ${repMin}–${repMax}. Tạ hơi nặng: ` +
+        (suggested != null
+          ? `giảm xuống ~${fmtKg(suggested)} kg cho các hiệp còn lại.`
+          : `giảm ~${Math.round(PCT_PER_REP * under * 100)}% cho các hiệp còn lại.`),
+    }
+  }
+
+  // ── Above range → too light → increase ────────────────────────────────────
+  if (firstSetReps > repMax) {
+    const over = firstSetReps - repMax
+    const suggested = w != null && w > 0 ? roundToHalfKg(w * (1 + PCT_PER_REP * over)) : null
+    return {
+      status: 'too_light',
+      currentWeightKg: w,
+      suggestedWeightKg: suggested,
+      repsOutOfRange: over,
+      progressReady: true,
+      message:
+        `Hiệp 1 đạt ${firstSetReps} lần — trên dải ${repMin}–${repMax}. Tạ hơi nhẹ: ` +
+        (suggested != null
+          ? `tăng lên ~${fmtKg(suggested)} kg cho các hiệp còn lại (buổi sau bắt đầu từ mức này).`
+          : `tăng ~${Math.round(PCT_PER_REP * over * 100)}% cho các hiệp còn lại.`),
+    }
+  }
+
+  // ── Inside range → keep the load ──────────────────────────────────────────
+  const atTop = firstSetReps >= repMax
+  const rirOk = firstSetRir == null || firstSetRir <= rirTarget
+  const progressReady = atTop && rirOk
+  const loadLabel = w != null && w > 0 ? `${fmtKg(w)} kg` : 'tạ'
+  return {
+    status: 'in_range',
+    currentWeightKg: w,
+    suggestedWeightKg: w,
+    repsOutOfRange: 0,
+    progressReady,
+    message: progressReady
+      ? `Hiệp 1 đạt ${firstSetReps} lần ở đỉnh dải ${repMin}–${repMax}` +
+        `${firstSetRir != null ? ` (RIR ${firstSetRir})` : ''} — giữ ${loadLabel} hôm nay, ` +
+        `sẵn sàng tăng tạ buổi sau ↑.`
+      : `Hiệp 1 đạt ${firstSetReps} lần — trong dải ${repMin}–${repMax}. Giữ nguyên ${loadLabel} ` +
+        `cho các hiệp còn lại; reps giảm dần do mệt mỏi là bình thường.`,
+  }
+}

@@ -59,6 +59,10 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: 'Tự điều chỉnh (Autoregulation)',
     def: 'Điều chỉnh tải của tuần sau dựa trên khảo sát cuối buổi (hiệu suất, cảm giác RIR, hồi phục) theo phương pháp Eric Helms.',
   },
+  intraSessionLoad: {
+    term: 'Tự điều chỉnh tải trong buổi',
+    def: 'Hiệp 1 chọn tạ ước đạt giữa/cận dưới dải rep ở RIR mục tiêu, rồi dừng đúng RIR đó. Nếu reps trong dải → giữ tạ (reps tụt dần là bình thường); nếu ngoài dải → chỉnh ~4% mỗi rep lệch. Đạt đỉnh dải ở RIR mục tiêu thì buổi sau tăng tạ.',
+  },
   magicLink: {
     term: 'Magic link',
     def: 'Liên kết riêng giúp học viên xem giáo án và ghi buổi tập mà không cần tài khoản đăng nhập.',

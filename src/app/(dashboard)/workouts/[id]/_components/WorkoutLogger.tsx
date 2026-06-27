@@ -1,11 +1,15 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDate, cn } from '@/lib/utils'
 import { HelpTip } from '@/components/ui/HelpTip'
 import { GLOSSARY } from '@/lib/glossary'
-import { buildNextWeekSuggestion } from '@/lib/autoregulation'
+import {
+  buildNextWeekSuggestion,
+  firstSetTargetHint,
+  computeIntraSessionGuidance,
+} from '@/lib/autoregulation'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
 import type {
   WorkoutSession,
@@ -31,6 +35,7 @@ interface GridCell {
   setId: string | null
   kg:    string
   reps:  string
+  rir:   string
 }
 
 type GridState  = Record<string, GridCell>   // `${exercise_id}:${set_number}`
@@ -71,6 +76,7 @@ function buildInitialGrid(sets: WorkoutSet[]): GridState {
       setId: s.id,
       kg:   s.weight_kg   != null ? String(s.weight_kg)   : '',
       reps: s.actual_reps != null ? String(s.actual_reps) : '',
+      rir:  s.rir         != null ? String(s.rir)         : '',
     }
   }
   return grid
@@ -187,13 +193,14 @@ export function WorkoutLogger({
     try {
       const weightKg   = cell.kg   ? parseFloat(cell.kg)    : null
       const actualReps = cell.reps ? parseInt(cell.reps, 10) : null
+      const rir        = cell.rir  ? parseInt(cell.rir, 10)  : null
 
       if (cell.setId) {
-        // PATCH existing set
+        // PATCH existing set — server recomputes rpe + e1RM from rir
         const res = await fetch(`${apiBase}/sets?set_id=${cell.setId}`, {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ weight_kg: weightKg, actual_reps: actualReps }),
+          body:    JSON.stringify({ weight_kg: weightKg, actual_reps: actualReps, rir }),
         })
         if (!res.ok) throw new Error('patch_failed')
       } else {
@@ -206,6 +213,7 @@ export function WorkoutLogger({
             set_number:  setNum,
             actual_reps: actualReps ?? 0,
             weight_kg:   weightKg,
+            rir,
             is_warmup:   false,
           }),
         })
@@ -237,14 +245,14 @@ export function WorkoutLogger({
   function updateCell(
     exerciseId: string,
     setNum:     number,
-    field:      'kg' | 'reps',
+    field:      'kg' | 'reps' | 'rir',
     value:      string,
   ) {
     const cellKey = `${exerciseId}:${setNum}`
     setGrid(prev => ({
       ...prev,
       [cellKey]: {
-        ...(prev[cellKey] ?? { setId: null, kg: '', reps: '' }),
+        ...(prev[cellKey] ?? { setId: null, kg: '', reps: '', rir: '' }),
         [field]: value,
       },
     }))
@@ -613,8 +621,12 @@ export function WorkoutLogger({
         <div className="rounded-2xl border border-ink/10 bg-white overflow-hidden shadow-sm">
           {/* Legend */}
           <div className="px-4 py-2 border-b border-ink/6 flex items-center gap-3">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-ink/35">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-ink/35 flex items-center gap-1">
               {sortedRows.length} bài tập
+            </span>
+            <span className="inline-flex items-center gap-1 text-[10px] text-amber/70">
+              Nhập RIR mỗi hiệp để tự điều chỉnh tải
+              <HelpTip text={GLOSSARY.intraSessionLoad.def} />
             </span>
             <span className="ml-auto flex items-center gap-2 text-[10px] text-ink/30">
               <span className="inline-flex items-center gap-1">
@@ -632,7 +644,7 @@ export function WorkoutLogger({
           <div className="overflow-x-auto">
             <table
               className="border-separate border-spacing-0"
-              style={{ minWidth: '780px', width: '100%' }}
+              style={{ minWidth: '1080px', width: '100%' }}
             >
               <thead>
                 <tr>
@@ -655,13 +667,14 @@ export function WorkoutLogger({
                   {Array.from({ length: MAX_SETS }, (_, i) => (
                     <th key={i}
                         className="border-b border-r border-ink/8 bg-paper/80 px-2 py-2 text-center"
-                        style={{ width: 96 }}>
+                        style={{ width: 134 }}>
                       <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30 block">
                         Hiệp {i + 1}
                       </span>
-                      <div className="flex justify-center gap-2 mt-0.5">
-                        <span className="text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
-                        <span className="text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
+                      <div className="flex justify-center gap-1.5 mt-0.5">
+                        <span className="w-[40px] text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
+                        <span className="w-[40px] text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
+                        <span className="w-[32px] text-[8px] text-amber/70 font-mono font-semibold">RIR</span>
                       </div>
                     </th>
                   ))}
@@ -686,8 +699,30 @@ export function WorkoutLogger({
                   const rowTint  = rowIdx % 2 === 1
                   const stickyBg = rowTint ? 'bg-[#F0EBE1]' : 'bg-paper'
 
+                  // ── Intra-session load guidance (Eric Helms) ───────────────
+                  // Reacts to the first working set vs the prescription. Skipped
+                  // for AMRAP (different intent) and peaking/%1RM weeks where the
+                  // rep-range rule doesn't apply.
+                  const s1 = grid[`${exerciseId}:1`]
+                  const guidance =
+                    !pe.is_amrap && !isPeaking && s1?.reps
+                      ? computeIntraSessionGuidance({
+                          firstSetReps:     parseInt(s1.reps, 10),
+                          firstSetWeightKg: s1.kg  ? parseFloat(s1.kg)   : null,
+                          firstSetRir:      s1.rir ? parseInt(s1.rir, 10) : null,
+                          repMin:           pe.target_rep_min,
+                          repMax:           pe.target_rep_max,
+                          rirTarget:        pe.rir_target,
+                        })
+                      : null
+                  const targetTip =
+                    !pe.is_amrap && !isPeaking
+                      ? firstSetTargetHint(pe.target_rep_min, pe.target_rep_max, pe.rir_target)
+                      : undefined
+
                   return (
-                    <tr key={pe.id}>
+                    <Fragment key={pe.id}>
+                    <tr>
                       {/* STT */}
                       <td className={cn('sticky left-0 z-10 border-b border-r border-ink/7 px-2.5 py-3', stickyBg)}
                           style={{ width: 44 }}>
@@ -712,7 +747,8 @@ export function WorkoutLogger({
 
                       {/* Target */}
                       <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')}
-                          style={{ width: 96 }}>
+                          style={{ width: 96 }}
+                          title={targetTip}>
                         <p className="font-mono text-[11px] text-ink/65 whitespace-nowrap">{targetLabel}</p>
                         {pe.rir_target != null && !pe.is_amrap && (
                           <p className="font-mono text-[10px] text-ink/35">RIR {pe.rir_target}</p>
@@ -728,7 +764,7 @@ export function WorkoutLogger({
                       {Array.from({ length: MAX_SETS }, (_, setIdx) => {
                         const setNum    = setIdx + 1
                         const cellKey   = `${exerciseId}:${setNum}`
-                        const cell      = grid[cellKey] ?? { setId: null, kg: '', reps: '' }
+                        const cell      = grid[cellKey] ?? { setId: null, kg: '', reps: '', rir: '' }
                         const saveState = cellSave[cellKey] ?? 'idle'
                         const isTarget  = setNum <= targetSets
                         const setDone   = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
@@ -740,8 +776,8 @@ export function WorkoutLogger({
                                 rowTint ? 'bg-ink/[0.018]' : '',
                                 !isTarget && 'opacity-35',
                               )}
-                              style={{ width: 96 }}>
-                            <div className="flex items-center gap-1">
+                              style={{ width: 134 }}>
+                            <div className="flex items-center gap-1.5">
                               {/* Kg */}
                               <input
                                 type="number"
@@ -755,7 +791,7 @@ export function WorkoutLogger({
                                 onBlur={() => flushCell(exerciseId, setNum)}
                                 aria-label={`${exName} hiệp ${setNum} kg`}
                                 className={cn(
-                                  'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                  'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
                                   'placeholder:text-ink/30 disabled:cursor-not-allowed',
                                   setDone
                                     ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
@@ -779,7 +815,7 @@ export function WorkoutLogger({
                                 onBlur={() => flushCell(exerciseId, setNum)}
                                 aria-label={`${exName} hiệp ${setNum} reps`}
                                 className={cn(
-                                  'h-8 w-[42px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                  'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
                                   'placeholder:text-ink/30 disabled:cursor-not-allowed',
                                   setDone
                                     ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
@@ -789,6 +825,30 @@ export function WorkoutLogger({
                                   saveState === 'saving' && 'border-amber animate-pulse',
                                   saveState === 'error'  && 'border-danger/60 bg-danger/5',
                                   !isCompleted && 'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
+                                )}
+                              />
+                              {/* RIR — số lần còn dự trữ khi dừng hiệp (autoregulation) */}
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                max="10"
+                                placeholder="—"
+                                disabled={isCompleted}
+                                value={cell.rir}
+                                onChange={e => updateCell(exerciseId, setNum, 'rir', e.target.value)}
+                                onBlur={() => flushCell(exerciseId, setNum)}
+                                aria-label={`${exName} hiệp ${setNum} RIR`}
+                                title="RIR — số reps còn dự trữ khi dừng hiệp"
+                                className={cn(
+                                  'h-8 w-[32px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
+                                  'placeholder:text-ink/25 disabled:cursor-not-allowed',
+                                  cell.rir
+                                    ? 'bg-amber/8 border-amber/40 text-amber font-semibold'
+                                    : 'bg-bone/60 border-[#D8CDB6] text-ink/40',
+                                  saveState === 'saving' && 'border-amber animate-pulse',
+                                  saveState === 'error'  && 'border-danger/60 bg-danger/5',
+                                  !isCompleted && 'hover:border-amber/60 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
                                 )}
                               />
                             </div>
@@ -813,6 +873,36 @@ export function WorkoutLogger({
                         />
                       </td>
                     </tr>
+
+                    {/* ── Intra-session load guidance row (Eric Helms) ── */}
+                    {guidance && (
+                      <tr>
+                        <td
+                          colSpan={3 + MAX_SETS + 1}
+                          className={cn('border-b border-ink/7 px-3 py-1.5', rowTint ? 'bg-ink/[0.018]' : '')}
+                        >
+                          <div className={cn(
+                            'flex items-start gap-2 rounded-lg border px-3 py-1.5',
+                            guidance.status === 'in_range'
+                              ? 'border-herb/25 bg-herb/6'
+                              : 'border-amber/30 bg-amber/8',
+                          )}>
+                            <span className="text-sm leading-none mt-0.5 shrink-0">
+                              {guidance.status === 'too_light' ? '⬆️'
+                                : guidance.status === 'too_heavy' ? '⬇️'
+                                : guidance.progressReady ? '🎯' : '✓'}
+                            </span>
+                            <p className={cn(
+                              'text-[11px] leading-relaxed',
+                              guidance.status === 'in_range' ? 'text-herb-deep' : 'text-amber',
+                            )}>
+                              {guidance.message}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   )
                 })}
               </tbody>
