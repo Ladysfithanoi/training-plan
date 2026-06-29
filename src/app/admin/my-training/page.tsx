@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
 import { currentWeekInPhase } from '@/lib/utils'
 import type { TrainingBlock, PhaseExercise, UserProgram, WeekType, WorkoutSession, WorkoutSet } from '@/types'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
@@ -49,7 +50,30 @@ export default async function CoachMyTrainingPage({
     } | null
   }
 
-  const userProgram = rawProgram as ProgramWithJoins | null
+  let userProgram = rawProgram as ProgramWithJoins | null
+
+  // ── Tự động chuyển Meso khi giai đoạn hết hạn ─────────────────────────────
+  // Without this the week counter runs past the meso's length (e.g. "Tuần 5/4")
+  // and never rolls over to the next phase. Mirrors the athlete dashboard.
+  if (userProgram?.current_phase && userProgram.phase_start_date && userProgram.current_phase_id) {
+    const cp = userProgram.current_phase as ProgramWithJoins['current_phase'] & { phase_order: number }
+    const result = await autoAdvancePhaseIfExpired({
+      id: userProgram.id,
+      block_id: userProgram.block_id,
+      current_phase_id: userProgram.current_phase_id,
+      phase_start_date: userProgram.phase_start_date,
+      current_phase: { duration_weeks: cp.duration_weeks, phase_order: cp.phase_order, name: cp.name },
+    })
+    if (result.advanced && !result.completed) {
+      const { data: refreshed } = await supabase
+        .from('user_programs')
+        .select('*, block:training_blocks(*), current_phase:phases(*)')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle()
+      if (refreshed) userProgram = refreshed as ProgramWithJoins
+    }
+  }
 
   // ── Phase exercises (current phase only) ───────────────────────────────────
   let phaseExercises: PhaseExercise[] = []

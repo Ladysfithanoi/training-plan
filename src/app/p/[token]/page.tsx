@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { resolveGuestToken } from '@/lib/guestToken'
+import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
 import { currentWeekInPhase } from '@/lib/utils'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
 import { GuestTrainingView } from './_components/GuestTrainingView'
@@ -38,7 +39,7 @@ export default async function GuestProgramPage({
     .eq('status', 'active')
     .maybeSingle()
 
-  const userProgram = rawProgram as (UserProgram & {
+  let userProgram = rawProgram as (UserProgram & {
     block: { name: string } | null
     current_phase: {
       name: string
@@ -51,6 +52,32 @@ export default async function GuestProgramPage({
       split_days: Array<{ id: string; type: string; label: string }>
     } | null
   }) | null
+
+  // ── Tự động chuyển Meso khi giai đoạn hết hạn ─────────────────────────────
+  // Uses the admin client (this is a public, session-less route) so the meso
+  // rolls over instead of the week counter overrunning (e.g. "Tuần 5/4").
+  if (userProgram?.current_phase && userProgram.phase_start_date && userProgram.current_phase_id) {
+    const cp = userProgram.current_phase as typeof userProgram.current_phase & { phase_order: number }
+    const result = await autoAdvancePhaseIfExpired(
+      {
+        id: userProgram.id,
+        block_id: userProgram.block_id,
+        current_phase_id: userProgram.current_phase_id,
+        phase_start_date: userProgram.phase_start_date,
+        current_phase: { duration_weeks: cp.duration_weeks, phase_order: cp.phase_order, name: cp.name },
+      },
+      admin,
+    )
+    if (result.advanced && !result.completed) {
+      const { data: refreshed } = await admin
+        .from('user_programs')
+        .select('*, block:training_blocks(*), current_phase:phases(*)')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .maybeSingle()
+      if (refreshed) userProgram = refreshed as typeof userProgram
+    }
+  }
 
   // ── Phase exercises ────────────────────────────────────────────────────────
   let phaseExercises: PhaseExercise[] = []

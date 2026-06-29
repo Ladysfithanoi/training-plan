@@ -7,17 +7,27 @@ export interface AdvanceResult {
   nextPhaseName: string | null
 }
 
+/** Minimal Supabase client surface used by the advance logic. */
+type AdvanceClient = Awaited<ReturnType<typeof createClient>> | ReturnType<typeof createAdminClient>
+
 /**
  * Checks if the user's current phase has expired and advances it automatically.
  * Returns what happened so the calling page can show the right banner.
+ *
+ * Pass a `client` when calling from a context without a user session (e.g. the
+ * public guest route, which uses the service-role admin client). When omitted,
+ * a session-based client is used and RLS lets the user update their own program.
  */
-export async function autoAdvancePhaseIfExpired(program: {
-  id: string
-  block_id: string
-  current_phase_id: string
-  phase_start_date: string
-  current_phase: { duration_weeks: number; phase_order: number; name: string } | null
-}): Promise<AdvanceResult> {
+export async function autoAdvancePhaseIfExpired(
+  program: {
+    id: string
+    block_id: string
+    current_phase_id: string
+    phase_start_date: string
+    current_phase: { duration_weeks: number; phase_order: number; name: string } | null
+  },
+  client?: AdvanceClient,
+): Promise<AdvanceResult> {
   if (!program.current_phase || !program.phase_start_date) {
     return { advanced: false, completed: false, nextPhaseName: null }
   }
@@ -26,8 +36,8 @@ export async function autoAdvancePhaseIfExpired(program: {
     return { advanced: false, completed: false, nextPhaseName: null }
   }
 
-  // Use session-based client — user can update their own program (RLS: user_id = auth.uid())
-  const supabase = await createClient()
+  // Default to the session-based client — user can update their own program (RLS: user_id = auth.uid())
+  const supabase = client ?? (await createClient())
   const today = new Date().toISOString().split('T')[0]
 
   // Find the next phase in the block
