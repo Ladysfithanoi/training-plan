@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       optimal_rep_max: Number(row.optimal_rep_max) || 20,
       description: row.description ? String(row.description).trim() : null,
       muscle_groups,
+      video_url: row.video_url ? String(row.video_url).trim() : null,
       created_by: profile.id,
     }
   })

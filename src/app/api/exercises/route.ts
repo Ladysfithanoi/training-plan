@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       optimal_rep_max: body.optimal_rep_max ?? 20,
       description: body.description ?? null,
       muscle_groups: body.muscle_groups ?? [],
+      video_url: body.video_url ?? null,
       created_by: profile.id,
     })
     .select('*, movement_pattern:movement_patterns(*)')

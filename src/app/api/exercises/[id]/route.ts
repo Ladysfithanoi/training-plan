@@ -52,6 +52,7 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/exercises/
   if (body.optimal_rep_max !== undefined) updatePayload.optimal_rep_max = body.optimal_rep_max
   if (body.description !== undefined) updatePayload.description = body.description
   if (body.muscle_groups !== undefined) updatePayload.muscle_groups = body.muscle_groups
+  if (body.video_url !== undefined) updatePayload.video_url = body.video_url
 
   const { data, error } = await supabase
     .from('exercises')

@@ -3,6 +3,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { cn } from '@/lib/utils'
 import { computeIntraSessionGuidance, firstSetTargetHint } from '@/lib/autoregulation'
+import { TechniqueButton } from './TechniqueButton'
 import type { PhaseExercise } from '@/types'
 
 // ─── Shared matrix types (used by Coach + Guest training views) ───────────────
@@ -241,6 +242,11 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       {pe.is_warmup && (
                         <span className="mt-1 inline-flex items-center rounded-full bg-sky-400/12 border border-sky-400/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-600 leading-none">🤸 Khởi động</span>
                       )}
+                      {pe.exercise?.video_url && (
+                        <div className="mt-1">
+                          <TechniqueButton url={pe.exercise.video_url} exerciseName={exName} />
+                        </div>
+                      )}
                       {pe.notes && (
                         <p className="mt-1.5 text-[10px] text-ink/55 leading-snug whitespace-pre-line">📝 {pe.notes}</p>
                       )}
@@ -451,6 +457,11 @@ function MobileFocus(p: MobileFocusProps) {
             )}
             {pe.is_warmup && (
               <span className="mt-1 inline-flex items-center rounded-full bg-sky-400/12 border border-sky-400/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-sky-600 leading-none">🤸 Khởi động</span>
+            )}
+            {pe.exercise?.video_url && (
+              <div className="mt-1.5">
+                <TechniqueButton url={pe.exercise.video_url} exerciseName={exName} variant="chip" />
+              </div>
             )}
           </div>
         </div>

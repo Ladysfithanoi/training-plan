@@ -13,6 +13,7 @@ interface ImportRow {
   optimal_rep_max: number
   muscle_groups: string
   description: string
+  video_url: string
 }
 
 interface Props {
@@ -74,6 +75,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
       const repMaxIdx = resolveColumn(headers, ['rep max', 'rep_max', 'optimal_rep_max', 'max reps', 'reps tối đa'])
       const muscleIdx = resolveColumn(headers, ['muscle', 'muscles', 'muscle groups', 'muscle_groups', 'nhóm cơ'])
       const descIdx = resolveColumn(headers, ['description', 'desc', 'notes', 'mô tả', 'ghi chú'])
+      const videoIdx = resolveColumn(headers, ['video', 'video_url', 'video url', 'youtube', 'link', 'link kỹ thuật'])
 
       if (nameIdx === -1) {
         setParseError('Không tìm thấy cột "name" (tên bài tập). Hãy đảm bảo hàng đầu tiên có tiêu đề.')
@@ -103,6 +105,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
           optimal_rep_max: repMaxIdx !== -1 ? Number(row[repMaxIdx]) || 20 : 20,
           muscle_groups: muscleIdx !== -1 ? String(row[muscleIdx] ?? '').trim() : '',
           description: descIdx !== -1 ? String(row[descIdx] ?? '').trim() : '',
+          video_url: videoIdx !== -1 ? String(row[videoIdx] ?? '').trim() : '',
         })
       }
 
@@ -135,6 +138,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
         ? r.muscle_groups.split(',').map(s => s.trim()).filter(Boolean)
         : [],
       description: r.description || null,
+      video_url: r.video_url || null,
     }))
 
     const res = await fetch('/api/exercises/import', {
@@ -212,7 +216,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
             <p className="font-semibold text-amber">Tên cột được hỗ trợ (không phân biệt chữ hoa/thường)</p>
             <p>
               <span className="font-medium text-ink/70">name / tên bài tập</span> (bắt buộc),
-              type / loại bài, pattern / chuỗi chuyển động, rep min, rep max, nhóm cơ, mô tả
+              type / loại bài, pattern / chuỗi chuyển động, rep min, rep max, nhóm cơ, mô tả, video / link kỹ thuật
             </p>
           </div>
 
@@ -235,6 +239,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
                       <th className="text-left px-3 py-2">Rep Min</th>
                       <th className="text-left px-3 py-2">Rep Max</th>
                       <th className="text-left px-3 py-2">Nhóm cơ</th>
+                      <th className="text-left px-3 py-2">Link kỹ thuật</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink/5">
@@ -291,6 +296,14 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
                             value={row.muscle_groups}
                             onChange={e => updateRow(i, 'muscle_groups', e.target.value)}
                             placeholder="đùi trước, mông..."
+                            className="w-full bg-transparent focus:outline-none focus:bg-white rounded px-1 py-0.5 border border-transparent focus:border-amber/40"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            value={row.video_url}
+                            onChange={e => updateRow(i, 'video_url', e.target.value)}
+                            placeholder="https://youtu.be/..."
                             className="w-full bg-transparent focus:outline-none focus:bg-white rounded px-1 py-0.5 border border-transparent focus:border-amber/40"
                           />
                         </td>

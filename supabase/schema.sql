@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS exercises (
   optimal_rep_max     INT  NOT NULL DEFAULT 20,
   description         TEXT,
   muscle_groups       TEXT[] NOT NULL DEFAULT '{}',
+  -- Technique demo link, typically YouTube (migration 014). NULL = none set.
+  video_url           TEXT,
   -- Which staff member authored this exercise (migration 007). NULL = admin.
   created_by          UUID REFERENCES profiles (id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()

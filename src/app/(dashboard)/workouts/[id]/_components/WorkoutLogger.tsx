@@ -11,6 +11,7 @@ import {
   computeIntraSessionGuidance,
 } from '@/lib/autoregulation'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
+import { TechniqueButton } from '@/components/training/TechniqueButton'
 import type {
   WorkoutSession,
   WorkoutSet,
@@ -742,6 +743,11 @@ export function WorkoutLogger({
                           <span className="mt-1 inline-flex items-center rounded-full bg-amber/15 border border-amber/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber leading-none">
                             🔥 AMRAP
                           </span>
+                        )}
+                        {pe.exercise?.video_url && (
+                          <div className="mt-1">
+                            <TechniqueButton url={pe.exercise.video_url} exerciseName={exName} />
+                          </div>
                         )}
                       </td>
 

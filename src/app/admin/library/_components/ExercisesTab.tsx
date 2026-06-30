@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { ImportExcelModal } from './ImportExcelModal'
+import { TechniqueButton } from '@/components/training/TechniqueButton'
 import type { Exercise, MovementPattern } from '@/types'
 
 interface Props {
@@ -81,6 +82,7 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
   const [formRepMax, setFormRepMax] = useState('20')
   const [formMuscles, setFormMuscles] = useState('')
   const [formDesc, setFormDesc] = useState('')
+  const [formVideo, setFormVideo] = useState('')
 
   function resetForm() {
     setFormName('')
@@ -90,6 +92,7 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
     setFormRepMax('20')
     setFormMuscles('')
     setFormDesc('')
+    setFormVideo('')
     setSaveError(null)
   }
 
@@ -106,6 +109,7 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
     setFormRepMax(String(ex.optimal_rep_max))
     setFormMuscles(ex.muscle_groups.join(', '))
     setFormDesc(ex.description ?? '')
+    setFormVideo(ex.video_url ?? '')
     setSaveError(null)
     setEditTarget(ex)
   }
@@ -128,6 +132,7 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
       optimal_rep_max: parseInt(formRepMax) || 20,
       muscle_groups: formMuscles.split(',').map(s => s.trim()).filter(Boolean),
       description: formDesc.trim() || null,
+      video_url: formVideo.trim() || null,
     }
 
     const isEdit = !!editTarget
@@ -259,6 +264,11 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
                     {ex.muscle_groups.length > 0 && (
                       <p className="text-xs text-ink/40">{ex.muscle_groups.join(', ')}</p>
                     )}
+                    {ex.video_url && (
+                      <div className="mt-1">
+                        <TechniqueButton url={ex.video_url} exerciseName={ex.name} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 sm:px-5 py-3 whitespace-nowrap">
                     <TypeBadge type={ex.type} />
@@ -379,6 +389,12 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
             value={formMuscles}
             onChange={e => setFormMuscles(e.target.value)}
             placeholder="VD: đùi trước, mông, đùi sau"
+          />
+          <Input
+            label="Link hướng dẫn kỹ thuật (YouTube — tuỳ chọn)"
+            value={formVideo}
+            onChange={e => setFormVideo(e.target.value)}
+            placeholder="VD: https://youtu.be/..."
           />
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">

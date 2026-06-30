@@ -94,6 +94,8 @@ export interface Exercise {
   optimal_rep_max: number
   description: string | null
   muscle_groups: string[]
+  /** Technique demo link (typically YouTube) — null = none set (migration 014) */
+  video_url?: string | null
   /** Which staff member authored this exercise — null = admin (migration 007) */
   created_by?: string | null
   created_at: string
