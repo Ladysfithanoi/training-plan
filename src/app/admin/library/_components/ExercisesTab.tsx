@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
@@ -20,6 +20,16 @@ interface Props {
 }
 
 const PAGE_SIZE = 10
+
+/** Query param dùng để nhớ trang hiện tại qua lần refresh. */
+const PAGE_PARAM = 'exPage'
+
+function readInitialPage() {
+  if (typeof window === 'undefined') return 1
+  const raw = new URLSearchParams(window.location.search).get(PAGE_PARAM)
+  const n = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
 
 const EXERCISE_TYPES = [
   { value: 'compound', label: 'Phức hợp' },
@@ -61,7 +71,7 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
    *  trial accounts (canAuthor=false) can never edit. */
   const canEdit = (ex: Exercise) => canAuthor && (isAdmin || ex.created_by === currentUserId)
   const [exercises, setExercises] = useState(initialExercises)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(readInitialPage)
   const [query, setQuery] = useState('')
   const [filterPattern, setFilterPattern] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
@@ -194,6 +204,14 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
   const currentPage = Math.min(page, totalPages)
   const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const globalOffset = (currentPage - 1) * PAGE_SIZE
+
+  // Ghi trang hiện tại lên URL để refresh không nhảy về trang 1.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (currentPage > 1) url.searchParams.set(PAGE_PARAM, String(currentPage))
+    else url.searchParams.delete(PAGE_PARAM)
+    window.history.replaceState(window.history.state, '', url)
+  }, [currentPage])
 
   const modalOpen = createOpen || !!editTarget
   const modalTitle = editTarget ? `Chỉnh sửa — ${editTarget.name}` : 'Thêm Bài Tập Mới'
