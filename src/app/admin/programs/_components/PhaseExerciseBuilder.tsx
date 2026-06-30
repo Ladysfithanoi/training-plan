@@ -7,6 +7,7 @@ import { Select } from '@/components/ui/Select'
 import { Card, CardBody } from '@/components/ui/Card'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
+import { TechniqueButton } from '@/components/training/TechniqueButton'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import {
   recommendSplit,
@@ -2816,6 +2817,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
                           <p className="text-[10px] font-semibold text-sky-600/80 mt-0.5">
                             🤸 Bài khởi động
                           </p>
+                        )}
+                        {pe.exercise?.video_url && (
+                          <div className="mt-1">
+                            <TechniqueButton url={pe.exercise.video_url} exerciseName={pe.exercise?.name ?? 'Bài tập'} />
+                          </div>
                         )}
                         {pe.notes && (
                           <p className="text-[11px] text-ink/50 mt-1 leading-snug whitespace-pre-line">
