@@ -34,6 +34,17 @@ export function currentWeekInPhase(phaseStartDate: string): number {
   return Math.max(1, Math.floor(days / 7) + 1)
 }
 
+/**
+ * Returns the 1-based week number within a phase for an arbitrary date
+ * (e.g. a past session's `session_date`). Same arithmetic as
+ * `currentWeekInPhase`, but relative to the supplied date instead of "now",
+ * so logged sessions can be bucketed back into the week they belong to.
+ */
+export function weekOfDateInPhase(phaseStartDate: string, dateStr: string): number {
+  const days = diffDays(new Date(phaseStartDate), new Date(dateStr))
+  return Math.max(1, Math.floor(days / 7) + 1)
+}
+
 /** True if the phase has exceeded its duration */
 export function isPhaseExpired(phaseStartDate: string, durationWeeks: number): boolean {
   const end = addWeeks(new Date(phaseStartDate), durationWeeks)

@@ -43,6 +43,8 @@ interface ExerciseMatrixProps {
   /** Mobile-only "Lưu buổi tập" handler, rendered under the last focus card. */
   onSaveSession:       () => void
   saveDisabled:        boolean
+  /** Read-only history view (past weeks): inputs are locked, save is hidden. */
+  readOnly?:           boolean
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,7 +114,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
     onNoteChange, onCellChange, onCellBlur,
     overloadSuggestions, isOverloadWeek, isPeaking, scopeKey, legendLabel,
     sessionCompleted, sessionCreating, anySaving, anyError,
-    onSaveSession, saveDisabled,
+    onSaveSession, saveDisabled, readOnly = false,
   } = props
 
   // ── Mobile focus index + per-exercise extra-set reveal ────────────────────
@@ -149,6 +151,14 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
   // ── Shared status chips (legend) ──────────────────────────────────────────
   const statusChips = (
     <span className="flex items-center gap-2.5 text-[10px] text-ink/30">
+      {readOnly && (
+        <span className="flex items-center gap-1 text-ink/45 font-semibold">
+          <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          Chỉ xem
+        </span>
+      )}
       {sessionCompleted && (
         <span className="flex items-center gap-1 text-herb font-bold">
           <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -274,6 +284,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               value={cell.kg}
                               onChange={e => onCellChange(exerciseId, setNum, 'kg', cleanKg(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
+                              readOnly={readOnly}
                               className={cn(
                                 'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
                                 setDone ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
@@ -291,6 +302,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               value={cell.reps}
                               onChange={e => onCellChange(exerciseId, setNum, 'reps', cleanReps(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
+                              readOnly={readOnly}
                               className={cn(
                                 'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors placeholder:text-ink/30',
                                 setDone ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
@@ -308,6 +320,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                               value={cell.rir}
                               onChange={e => onCellChange(exerciseId, setNum, 'rir', cleanReps(e.target.value))}
                               onBlur={() => onCellBlur(exerciseId, setNum)}
+                              readOnly={readOnly}
                               className={cn(
                                 'h-8 w-[32px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors placeholder:text-ink/25',
                                 cell.rir ? 'bg-amber/8 border-amber/40 text-amber font-semibold'
@@ -327,6 +340,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                         aria-label={`${exName} ghi chú`}
                         value={exerciseNotes[exerciseId] ?? ''}
                         onChange={e => onNoteChange(exerciseId, e.target.value)}
+                        readOnly={readOnly}
                         className="h-8 w-full rounded border border-ink/10 bg-transparent px-2 text-xs font-mono text-ink/70 outline-none transition-colors placeholder:text-ink/18 focus:border-ink/30 focus:bg-ink/3"
                       />
                     </td>
@@ -378,6 +392,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
           sessionCompleted={sessionCompleted}
           onSaveSession={onSaveSession}
           saveDisabled={saveDisabled}
+          readOnly={readOnly}
         />
       </div>
     </>
@@ -406,6 +421,7 @@ interface MobileFocusProps {
   sessionCompleted:    boolean
   onSaveSession:       () => void
   saveDisabled:        boolean
+  readOnly:            boolean
 }
 
 function MobileFocus(p: MobileFocusProps) {
@@ -501,6 +517,7 @@ function MobileFocus(p: MobileFocusProps) {
                   value={cell.kg}
                   onChange={e => p.onCellChange(exerciseId, setNum, 'kg', cleanKg(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
+                  readOnly={p.readOnly}
                   className={cn(
                     'flex-1 min-w-0 py-3 px-3 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums',
                     setDone ? 'bg-herb-wash border-herb text-herb-deep'
@@ -518,6 +535,7 @@ function MobileFocus(p: MobileFocusProps) {
                   value={cell.reps}
                   onChange={e => p.onCellChange(exerciseId, setNum, 'reps', cleanReps(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
+                  readOnly={p.readOnly}
                   className={cn(
                     'flex-1 min-w-0 py-3 px-3 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums placeholder:text-ink/30 placeholder:font-medium',
                     setDone ? 'bg-herb-wash border-herb text-herb-deep'
@@ -534,6 +552,7 @@ function MobileFocus(p: MobileFocusProps) {
                   value={cell.rir}
                   onChange={e => p.onCellChange(exerciseId, setNum, 'rir', cleanReps(e.target.value))}
                   onBlur={() => p.onCellBlur(exerciseId, setNum)}
+                  readOnly={p.readOnly}
                   className={cn(
                     'w-16 shrink-0 py-3 px-2 text-lg font-bold font-mono text-center rounded-xl border outline-none transition-colors tabular-nums placeholder:text-ink/25 placeholder:font-medium',
                     cell.rir ? 'bg-amber/8 border-amber/40 text-amber'
@@ -580,6 +599,7 @@ function MobileFocus(p: MobileFocusProps) {
             aria-label={`${exName} ghi chú`}
             value={p.exerciseNotes[exerciseId] ?? ''}
             onChange={e => p.onNoteChange(exerciseId, e.target.value)}
+            readOnly={p.readOnly}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-ink/80 outline-none transition-colors placeholder:text-ink/25 focus:border-ink/30 focus:bg-white"
           />
         </div>
@@ -604,7 +624,7 @@ function MobileFocus(p: MobileFocusProps) {
       </div>
 
       {/* ── Save on last card ─────────────────────────────────────────────── */}
-      {isLast && !p.sessionCompleted && (
+      {isLast && !p.sessionCompleted && !p.readOnly && (
         <button type="button" onClick={p.onSaveSession} disabled={p.saveDisabled}
           className="w-full rounded-xl bg-herb text-paper font-bold py-3.5 text-base hover:bg-herb/90 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 shadow-sm">
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

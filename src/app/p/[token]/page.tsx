@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { resolveGuestToken } from '@/lib/guestToken'
 import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
-import { currentWeekInPhase } from '@/lib/utils'
+import { currentWeekInPhase, weekOfDateInPhase } from '@/lib/utils'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
 import { GuestTrainingView } from './_components/GuestTrainingView'
 import type { PhaseExercise, WorkoutSession, WorkoutSet, UserProgram, WeekType } from '@/types'
@@ -89,6 +89,28 @@ export default async function GuestProgramPage({
     phaseExercises = (data ?? []) as PhaseExercise[]
   }
 
+  // ── Completed sessions for the WHOLE current phase, bucketed by week ─────────
+  // These are what make past weeks re-viewable: each week tab hydrates its grid
+  // from the sessions logged in that week (derived from session_date vs.
+  // phase_start_date). `select('*')` keeps this resilient to migration-004
+  // columns being absent on the live DB.
+  type WeekSessionRow = WorkoutSession & { week: number; sets: WorkoutSet[] }
+  let weekSessions: WeekSessionRow[] = []
+  if (userProgram?.current_phase_id && userProgram.phase_start_date) {
+    const startDate = userProgram.phase_start_date
+    const { data: phaseSessionRows } = await admin
+      .from('workout_sessions')
+      .select('*, sets:workout_sets(*)')
+      .eq('user_id', userId)
+      .eq('phase_id', userProgram.current_phase_id)
+      .eq('status', 'completed')
+      .order('session_date', { ascending: true })
+    weekSessions = ((phaseSessionRows ?? []) as (WorkoutSession & { sets: WorkoutSet[] })[]).map(s => ({
+      ...s,
+      week: weekOfDateInPhase(startDate, s.session_date),
+    }))
+  }
+
   // ── Recent sessions (last 10) ──────────────────────────────────────────────
   const { data: recentRaw } = await admin
     .from('workout_sessions')
@@ -159,6 +181,7 @@ export default async function GuestProgramPage({
       phaseSplitDays={phaseSplitDays}
       weekInPhase={weekInPhase}
       recentSessions={recentSessions}
+      weekSessions={weekSessions}
       prevSuggestion={prevSuggestion}
       phaseWeekType={phaseWeekType}
       todayCompletedSession={todayCompletedSession}
