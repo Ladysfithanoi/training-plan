@@ -37,6 +37,7 @@ type ProgramWithJoins = UserProgram & {
 }
 
 type SessionRow = Omit<WorkoutSession, 'sets'> & { sets: { count: number }[] }
+type WeekSessionRow = WorkoutSession & { week: number; sets: WorkoutSet[] }
 
 interface GridCell { setId: string | null; kg: string; reps: string; rir: string }
 type GridState = Record<string, GridCell>
@@ -60,6 +61,8 @@ interface CoachTrainingViewProps {
   weekInPhase:             number
   availableBlocks:         TrainingBlock[]
   recentSessions:          SessionRow[]
+  /** All completed sessions of the current phase, each tagged with its week. */
+  weekSessions:            WeekSessionRow[]
   prevSuggestion:          string | null
   phaseWeekType:           WeekType
   /** Server-prefetched completed session for today (with full sets). Non-null = grid is locked on mount. */
@@ -178,6 +181,27 @@ function readSessionSuggestion(s: SessionLike | null | undefined): string {
   return s?.next_week_suggestion ?? extractSuggestionFromNotes(s?.notes)
 }
 
+interface ExAverage { avgKg: number | null; avgReps: number; count: number }
+
+/** Average working-set weight & reps for one exercise across a given week. */
+function averageForWeekExercise(
+  weekSessions: WeekSessionRow[],
+  week: number,
+  exerciseId: string,
+): ExAverage | null {
+  const sets = weekSessions
+    .filter(s => s.week === week)
+    .flatMap(s => (s.sets ?? []) as WorkoutSet[])
+    .filter(s => s.exercise_id === exerciseId && !s.is_warmup && s.actual_reps != null)
+  if (sets.length === 0) return null
+  const kgSets = sets.filter(s => s.weight_kg != null)
+  const avgKg = kgSets.length
+    ? Math.round((kgSets.reduce((a, s) => a + (s.weight_kg ?? 0), 0) / kgSets.length) * 4) / 4
+    : null
+  const avgReps = Math.round(sets.reduce((a, s) => a + (s.actual_reps ?? 0), 0) / sets.length)
+  return { avgKg, avgReps, count: sets.length }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function CoachTrainingView({
@@ -187,6 +211,7 @@ export function CoachTrainingView({
   weekInPhase,
   availableBlocks,
   recentSessions,
+  weekSessions,
   prevSuggestion,
   phaseWeekType,
   todayCompletedSession,
@@ -480,14 +505,44 @@ export function CoachTrainingView({
     setActiveSets([])
     // Keep activeSession so continued typing saves to the same DB row
 
+    // ── Past / future weeks: hydrate a READ-ONLY grid from stored sessions ─────
+    // Sessions carry no week column — they're bucketed by session_date relative
+    // to phase_start_date (server-side). Gathering every set logged in `week`
+    // and filtering to the active day's exercises re-materialises that week's
+    // logged data even for split programs where each day was a separate session.
+    function hydrateHistoricWeek(week: number) {
+      const weekRows = resolveWeekExercises(phaseExercises, week)
+      const dayExIds = new Set(
+        (hasSplit && activeDayId ? weekRows.filter(pe => pe.day_id === activeDayId) : weekRows)
+          .map(pe => pe.exercise_id),
+      )
+      const daySets = weekSessions
+        .filter(s => s.week === week)
+        .flatMap(s => (s.sets ?? []) as WorkoutSet[])
+        .filter(s => dayExIds.has(s.exercise_id))
+      if (daySets.length === 0) return  // nothing logged that week/day → leave empty
+
+      setGrid(() => buildInitialGrid(daySets))
+      setActiveSets(daySets.map(s => ({
+        id: s.id, exercise_id: s.exercise_id, set_number: s.set_number,
+        weight_kg: s.weight_kg ?? null, actual_reps: s.actual_reps ?? null, rir: s.rir ?? null,
+      })))
+      setSessionCompleted(true)
+
+      const setsForVol = daySets.map(s => ({
+        actual_reps: s.actual_reps ?? null, weight_kg: s.weight_kg ?? null, is_warmup: s.is_warmup ?? false,
+      }))
+      setSummaryVolumeKg(Math.round(computeSessionVolume(setsForVol)))
+      setSummaryWorkingSets(computeSessionWorkingSets(setsForVol))
+      const sessWithSuggestion = weekSessions.find(s => s.week === week && readSessionSuggestion(s))
+      if (sessWithSuggestion) setSummaryText(readSessionSuggestion(sessWithSuggestion))
+      setShowSummary(true)
+    }
+
     // ── Step 2: Re-check DB ───────────────────────────────────────────────────
     async function recheckSession() {
-      // Non-current weeks have no logged session yet — always blank & unlocked.
-      // Completed session data is strictly scoped to the current calendar week.
-      if (activeWeek !== weekInPhase) {
-        console.log('[CoachTrainingView] week', activeWeek, '≠ current week', weekInPhase, '— grid stays blank')
-        return
-      }
+      // Non-current weeks: no live editing — hydrate their logged data read-only.
+      if (activeWeek !== weekInPhase) { hydrateHistoricWeek(activeWeek); return }
 
       const todayStr = new Date().toISOString().split('T')[0]
       console.log(
@@ -785,6 +840,11 @@ export function CoachTrainingView({
   const isPeaking          = phaseWeekType === 'peaking' || phaseWeekType === 'taper'
   const currentWeekIsDeload = isDeloadWeek(activeWeek)
 
+  // Any week other than the current one is a read-only history view — its grid is
+  // hydrated from stored sessions and must not accept new edits (which would
+  // otherwise create a session dated today, in the wrong week).
+  const isViewingPastWeek = activeWeek !== weekInPhase
+
   // Per-week resolution (migration 011): the active week's effective prescription,
   // falling back to the base program when that week isn't customised.
   const weekExercises = resolveWeekExercises(phaseExercises, activeWeek)
@@ -792,6 +852,24 @@ export function CoachTrainingView({
     ? weekExercises.filter(pe => pe.day_id === activeDayId)
     : weekExercises
   const sortedRows = sortByOrderLabel(dayExercises)
+
+  // Previous-week reference (mức tạ & reps trung bình) per exercise — shown
+  // INLINE on each exercise so, in e.g. week 3, you instantly see what you did
+  // for that same lift in week 2 without digging back through the week tabs.
+  const prevWeek = activeWeek - 1
+  const prevWeekRef = prevWeek >= 1
+    ? (() => {
+        const labels: Record<string, string> = {}
+        for (const pe of sortedRows) {
+          const avg = averageForWeekExercise(weekSessions, prevWeek, pe.exercise_id)
+          if (avg) {
+            labels[pe.exercise_id] =
+              `${avg.avgKg != null ? `${avg.avgKg} kg` : '—'} × ${avg.avgReps} lần`
+          }
+        }
+        return Object.keys(labels).length > 0 ? { week: prevWeek, labels } : undefined
+      })()
+    : undefined
 
   const hasAnyData = Object.values(grid).some(c => c.kg || c.reps) || activeSets.length > 0
   const anySaving  = Object.values(cellSave).some(s => s === 'saving')
@@ -1176,8 +1254,23 @@ export function CoachTrainingView({
           <p className="text-xs text-danger/70 font-semibold">⚡ Peak — tạ nặng · reps thấp · kỹ thuật tuyệt đối</p>
         )}
 
+        {/* ── Read-only history banner ─────────────────────────────────────── */}
+        {isViewingPastWeek && (
+          <div className="rounded-xl border border-slate-300 bg-slate-100/70 px-4 py-2.5 flex items-center gap-2.5">
+            <span className="text-base shrink-0">🔒</span>
+            <p className="text-xs text-ink/60 leading-snug">
+              Đang xem lại <span className="font-bold text-ink/80">Tuần {activeWeek}</span> — chế độ chỉ xem.
+              {' '}Thông số đã ghi được giữ nguyên; chuyển về{' '}
+              <button type="button" onClick={() => handleWeekSelect(weekInPhase)}
+                className="font-bold text-herb underline underline-offset-2 hover:text-herb/80 transition-colors">
+                Tuần {weekInPhase}
+              </button>{' '}để nhập buổi tập mới.
+            </p>
+          </div>
+        )}
+
         {/* ══════════════════════════════════════════════════════════════════════
-            EXERCISE MATRIX — always unlocked, direct data entry
+            EXERCISE MATRIX — editable for the current week, read-only for others
         ══════════════════════════════════════════════════════════════════════ */}
         <ExerciseMatrix
           rows={sortedRows}
@@ -1199,6 +1292,8 @@ export function CoachTrainingView({
           anyError={anyError}
           onSaveSession={handleSaveSession}
           saveDisabled={!hasAnyData || !activeSession}
+          readOnly={isViewingPastWeek}
+          prevWeekRef={prevWeekRef}
         />
 
         {/* ══════════════════════════════════════════════════════════════════════
@@ -1245,7 +1340,7 @@ export function CoachTrainingView({
         )}
 
         {/* ── Action bar — desktop only (mobile uses the in-card save button) ─── */}
-        {sortedRows.length > 0 && !sessionCompleted && (
+        {sortedRows.length > 0 && !sessionCompleted && !isViewingPastWeek && (
           <div className="hidden md:flex flex-wrap items-center gap-3">
             <button
               type="button"

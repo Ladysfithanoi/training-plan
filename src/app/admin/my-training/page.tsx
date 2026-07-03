@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
-import { currentWeekInPhase } from '@/lib/utils'
+import { currentWeekInPhase, weekOfDateInPhase } from '@/lib/utils'
 import type { TrainingBlock, PhaseExercise, UserProgram, WeekType, WorkoutSession, WorkoutSet } from '@/types'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
 import { CoachTrainingView } from './_components/CoachTrainingView'
@@ -149,6 +149,26 @@ export default async function CoachMyTrainingPage({
     todayCompletedSession = ((todayRows ?? [])[0] ?? null) as CompletedSessionWithSets | null
   }
 
+  // ── Completed sessions for the WHOLE current phase, bucketed by week ─────────
+  // Powers re-viewable past weeks + the per-exercise "previous week" reminder.
+  // `select('*')` stays resilient to migration-004 columns being absent.
+  type WeekSessionRow = WorkoutSession & { week: number; sets: WorkoutSet[] }
+  let weekSessions: WeekSessionRow[] = []
+  if (userProgram?.current_phase_id && userProgram.phase_start_date) {
+    const startDate = userProgram.phase_start_date
+    const { data: phaseSessionRows } = await supabase
+      .from('workout_sessions')
+      .select('*, sets:workout_sets(*)')
+      .eq('user_id', user.id)
+      .eq('phase_id', userProgram.current_phase_id)
+      .eq('status', 'completed')
+      .order('session_date', { ascending: true })
+    weekSessions = ((phaseSessionRows ?? []) as (WorkoutSession & { sets: WorkoutSet[] })[]).map(s => ({
+      ...s,
+      week: weekOfDateInPhase(startDate, s.session_date),
+    }))
+  }
+
   // ── Previous autoregulation suggestion ────────────────────────────────────
   // Resilient to migration 004 not being deployed: select `*` (never errors on
   // missing columns) and prefer the real column, falling back to notes decoding.
@@ -191,6 +211,7 @@ export default async function CoachMyTrainingPage({
         weekInPhase={weekInPhase}
         availableBlocks={availableBlocks}
         recentSessions={recentSessions}
+        weekSessions={weekSessions}
         prevSuggestion={prevSuggestion}
         phaseWeekType={phaseWeekType}
         todayCompletedSession={forceSelector ? null : todayCompletedSession}
