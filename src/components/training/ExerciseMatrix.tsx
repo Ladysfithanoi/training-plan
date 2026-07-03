@@ -268,7 +268,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       )}
                       {prevWeekRef?.labels[exerciseId] && (
                         <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber/8 border border-amber/20 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-amber leading-none">
-                          📊 T{prevWeekRef.week}: {prevWeekRef.labels[exerciseId]}
+                          📊 Tuần {prevWeekRef.week} đã tập {prevWeekRef.labels[exerciseId]}
                         </p>
                       )}
                     </td>
@@ -508,7 +508,7 @@ function MobileFocus(p: MobileFocusProps) {
           <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5 flex items-center gap-2">
             <span className="text-base shrink-0">📊</span>
             <p className="text-sm text-ink/75">
-              <span className="font-semibold text-amber">Tuần {p.prevWeekRef.week}:</span>{' '}
+              <span className="font-semibold text-amber">Tuần {p.prevWeekRef.week} đã tập</span>{' '}
               <span className="font-mono font-semibold">{p.prevWeekRef.labels[exerciseId]}</span>
             </p>
           </div>

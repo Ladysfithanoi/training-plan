@@ -864,7 +864,7 @@ export function CoachTrainingView({
           const avg = averageForWeekExercise(weekSessions, prevWeek, pe.exercise_id)
           if (avg) {
             labels[pe.exercise_id] =
-              `${avg.avgKg != null ? `${avg.avgKg} kg` : '—'} × ${avg.avgReps} lần`
+              `${avg.avgKg != null ? `${avg.avgKg}kg` : '—'} × ${avg.avgReps} reps`
           }
         }
         return Object.keys(labels).length > 0 ? { week: prevWeek, labels } : undefined
