@@ -632,14 +632,23 @@ export function GuestTrainingView({
     : weekExercises
   const sortedRows = sortByOrderLabel(dayExercises)
 
-  // Previous-week reference (mức tạ & reps trung bình) for the exercises shown —
-  // a quick "what did I do last week" anchor for progressive overload.
+  // Previous-week reference (mức tạ & reps trung bình) per exercise — shown
+  // INLINE on each exercise so, in e.g. week 3, you instantly see what you did
+  // for that same lift in week 2 without digging back through the week tabs.
   const prevWeek = activeWeek - 1
-  const prevWeekAverages = prevWeek >= 1
-    ? sortedRows
-        .map(pe => ({ pe, avg: averageForWeekExercise(weekSessions, prevWeek, pe.exercise_id) }))
-        .filter((r): r is { pe: PhaseExercise; avg: ExAverage } => r.avg !== null)
-    : []
+  const prevWeekRef = prevWeek >= 1
+    ? (() => {
+        const labels: Record<string, string> = {}
+        for (const pe of sortedRows) {
+          const avg = averageForWeekExercise(weekSessions, prevWeek, pe.exercise_id)
+          if (avg) {
+            labels[pe.exercise_id] =
+              `${avg.avgKg != null ? `${avg.avgKg} kg` : '—'} × ${avg.avgReps} lần`
+          }
+        }
+        return Object.keys(labels).length > 0 ? { week: prevWeek, labels } : undefined
+      })()
+    : undefined
 
   const hasAnyData = Object.values(grid).some(c => c.kg || c.reps) || activeSets.length > 0
   const anySaving  = Object.values(cellSave).some(s => s === 'saving')
@@ -877,32 +886,6 @@ export function GuestTrainingView({
           </div>
         )}
 
-        {/* ── Previous-week reference (mức tạ & reps trung bình) ────────────── */}
-        {prevWeekAverages.length > 0 && (
-          <div className="rounded-2xl border border-ink/10 bg-white overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-ink/6 flex items-center gap-2">
-              <span className="text-sm">📊</span>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-ink/45">
-                Trung bình Tuần {prevWeek}
-              </p>
-              <span className="ml-auto text-[10px] text-ink/30">Tham chiếu để tăng tải</span>
-            </div>
-            <div className="divide-y divide-ink/5">
-              {prevWeekAverages.map(({ pe, avg }) => (
-                <div key={pe.id} className="flex items-center gap-3 px-4 py-2">
-                  <span className="font-sans font-bold text-[11px] text-ink/40 shrink-0 w-6">{pe.order_label ?? '—'}</span>
-                  <span className="flex-1 min-w-0 text-sm font-medium text-ink/75 truncate">{pe.exercise?.name ?? 'Bài tập'}</span>
-                  <span className="shrink-0 font-mono text-sm font-semibold text-ink/80 tabular-nums">
-                    {avg.avgKg != null ? `${avg.avgKg} kg` : '—'}
-                    <span className="text-ink/35 font-normal"> × </span>
-                    {avg.avgReps} <span className="text-ink/45 font-normal text-xs">lần</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* ══════════════════════════════════════════════════════════════════════
             EXERCISE MATRIX — editable for the current week, read-only for others
         ══════════════════════════════════════════════════════════════════════ */}
@@ -927,6 +910,7 @@ export function GuestTrainingView({
           onSaveSession={handleSaveSession}
           saveDisabled={!hasAnyData || !activeSession}
           readOnly={isViewingPastWeek}
+          prevWeekRef={prevWeekRef}
         />
 
         {/* ── Post-session summary ─────────────────────────────────────────── */}

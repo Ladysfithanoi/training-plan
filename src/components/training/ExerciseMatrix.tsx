@@ -45,6 +45,12 @@ interface ExerciseMatrixProps {
   saveDisabled:        boolean
   /** Read-only history view (past weeks): inputs are locked, save is hidden. */
   readOnly?:           boolean
+  /**
+   * Previous-week reference shown inline on each exercise: e.g. in week 3 it
+   * reminds you that in week 2 you did "12.5 kg × 10 lần" for that same lift.
+   * `labels` is keyed by exercise_id; only exercises with logged data appear.
+   */
+  prevWeekRef?:        { week: number; labels: Record<string, string> }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,7 +120,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
     onNoteChange, onCellChange, onCellBlur,
     overloadSuggestions, isOverloadWeek, isPeaking, scopeKey, legendLabel,
     sessionCompleted, sessionCreating, anySaving, anyError,
-    onSaveSession, saveDisabled, readOnly = false,
+    onSaveSession, saveDisabled, readOnly = false, prevWeekRef,
   } = props
 
   // ── Mobile focus index + per-exercise extra-set reveal ────────────────────
@@ -260,6 +266,11 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       {pe.notes && (
                         <p className="mt-1.5 text-[10px] text-ink/55 leading-snug whitespace-pre-line">📝 {pe.notes}</p>
                       )}
+                      {prevWeekRef?.labels[exerciseId] && (
+                        <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber/8 border border-amber/20 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-amber leading-none">
+                          📊 T{prevWeekRef.week}: {prevWeekRef.labels[exerciseId]}
+                        </p>
+                      )}
                     </td>
                     <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')} style={{ width: 96 }} title={targetTip}>
                       <p className="font-mono text-[11px] text-ink/65 whitespace-nowrap">{targetLabelOf(pe)}</p>
@@ -393,6 +404,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
           onSaveSession={onSaveSession}
           saveDisabled={saveDisabled}
           readOnly={readOnly}
+          prevWeekRef={prevWeekRef}
         />
       </div>
     </>
@@ -422,6 +434,7 @@ interface MobileFocusProps {
   onSaveSession:       () => void
   saveDisabled:        boolean
   readOnly:            boolean
+  prevWeekRef?:        { week: number; labels: Record<string, string> }
 }
 
 function MobileFocus(p: MobileFocusProps) {
@@ -487,6 +500,17 @@ function MobileFocus(p: MobileFocusProps) {
           <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-amber/70 mb-1">📝 Ghi chú từ HLV</p>
             <p className="text-sm text-ink/75 leading-snug whitespace-pre-line">{pe.notes}</p>
+          </div>
+        )}
+
+        {/* previous-week reference — "tuần trước bài này bạn tập …" */}
+        {p.prevWeekRef?.labels[exerciseId] && (
+          <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5 flex items-center gap-2">
+            <span className="text-base shrink-0">📊</span>
+            <p className="text-sm text-ink/75">
+              <span className="font-semibold text-amber">Tuần {p.prevWeekRef.week}:</span>{' '}
+              <span className="font-mono font-semibold">{p.prevWeekRef.labels[exerciseId]}</span>
+            </p>
           </div>
         )}
 
