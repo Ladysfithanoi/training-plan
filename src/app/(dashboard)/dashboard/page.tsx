@@ -229,7 +229,9 @@ export default async function DashboardPage() {
           <CardHeader><CardTitle>Tuần trong giai đoạn</CardTitle></CardHeader>
           <CardBody>
             <p className="text-xl font-bold font-mono text-ink tabular-nums">
-              {weekNum !== null ? `${weekNum} / ${activeProgram!.current_phase!.duration_weeks}` : '—'}
+              {weekNum !== null && activeProgram?.current_phase
+                ? `${weekNum} / ${activeProgram.current_phase.duration_weeks}`
+                : '—'}
             </p>
             {activeProgram?.current_phase && (
               <p className="text-xs text-ink/40 mt-1">{activeProgram.current_phase.frequency_per_week}× mỗi tuần</p>
