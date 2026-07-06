@@ -27,6 +27,12 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
   const router = useRouter()
   const [users, setUsers] = useState(initialUsers)
   const [page, setPage] = useState(1)
+
+  // Bộ lọc + tìm kiếm danh sách học viên
+  const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<'all' | ManagedRole>('all')
+  // Lọc theo HLV (created_by). '__admin__' = tài khoản do Admin tạo (created_by null).
+  const [coachFilter, setCoachFilter] = useState<string>('all')
   const [createOpen, setCreateOpen] = useState(false)
   const [assignOpen, setAssignOpen] = useState<Profile | null>(null)
   const [editOpen, setEditOpen] = useState<Profile | null>(null)
@@ -67,10 +73,42 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
   // Kích hoạt / Tạm ngưng tài khoản Trải nghiệm
   const [trialBusyId, setTrialBusyId] = useState<string | null>(null)
 
-  // Phân trang
-  const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE))
+  // Danh sách HLV (dùng cho ô lọc theo Huấn luyện viên) + tra tên theo id.
+  const coaches = users.filter(u => u.role === 'coach')
+  const coachFilterOptions = [
+    { value: 'all', label: 'Tất cả HLV' },
+    ...coaches.map(c => ({ value: c.id, label: c.full_name ?? c.email })),
+    { value: '__admin__', label: 'Admin tạo (không có HLV)' },
+  ]
+
+  const roleFilterOptions = [
+    { value: 'all', label: 'Tất cả vai trò' },
+    { value: 'user', label: 'Học viên' },
+    { value: 'coach', label: 'HLV' },
+    { value: 'trial', label: 'Trải nghiệm' },
+    { value: 'admin', label: 'Quản trị viên' },
+  ]
+
+  // Lọc + tìm kiếm trước khi phân trang.
+  const query = search.trim().toLowerCase()
+  const filtered = users.filter(u => {
+    if (roleFilter !== 'all' && u.role !== roleFilter) return false
+    if (coachFilter === '__admin__') {
+      if (u.created_by) return false
+    } else if (coachFilter !== 'all') {
+      if (u.created_by !== coachFilter) return false
+    }
+    if (query) {
+      const haystack = `${u.full_name ?? ''} ${u.email}`.toLowerCase()
+      if (!haystack.includes(query)) return false
+    }
+    return true
+  })
+
+  // Phân trang (trên danh sách đã lọc)
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
-  const pageItems = users.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const globalOffset = (currentPage - 1) * PAGE_SIZE
 
   async function handleCreate() {
@@ -281,7 +319,11 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
     <>
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-ink/50">{users.length} học viên</p>
+        <p className="text-sm text-ink/50">
+          {filtered.length === users.length
+            ? `${users.length} học viên`
+            : `${filtered.length} / ${users.length} học viên`}
+        </p>
         <Button onClick={() => setCreateOpen(true)}>
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -305,6 +347,44 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
         </div>
       )}
 
+      {/* Bộ lọc + tìm kiếm */}
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Ô tìm kiếm — theo tên hoặc email */}
+        <div className="relative">
+          <svg
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/35"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1) }}
+            placeholder="Tìm theo tên hoặc email..."
+            className="h-10 w-full rounded-lg border border-ink/15 bg-white pl-9 pr-3 text-sm text-ink placeholder:text-ink/35 outline-none transition-colors focus:border-amber focus:ring-1 focus:ring-amber"
+          />
+        </div>
+
+        {/* Bộ lọc theo vai trò */}
+        <Select
+          value={roleFilter}
+          onChange={e => { setRoleFilter(e.target.value as 'all' | ManagedRole); setPage(1) }}
+          options={roleFilterOptions}
+          aria-label="Lọc theo vai trò"
+        />
+
+        {/* Ô lọc theo Huấn luyện viên — chỉ Admin mới thấy nhiều HLV */}
+        {isAdmin && (
+          <Select
+            value={coachFilter}
+            onChange={e => { setCoachFilter(e.target.value); setPage(1) }}
+            options={coachFilterOptions}
+            aria-label="Lọc theo Huấn luyện viên"
+          />
+        )}
+      </div>
+
       {/* Bảng học viên
            Single scroll container: overflow-x-auto + min-w on the table forces
            a genuine horizontal slider — the table never shrinks below 1100 px
@@ -313,6 +393,10 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
       {users.length === 0 ? (
         <div className="rounded-lg border border-gray-100 bg-white py-10">
           <p className="text-sm text-center text-ink/40">Chưa có học viên nào. Hãy thêm mới ở trên.</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-lg border border-gray-100 bg-white py-10">
+          <p className="text-sm text-center text-ink/40">Không tìm thấy học viên phù hợp với bộ lọc.</p>
         </div>
       ) : (
         <div className="w-full overflow-x-auto border border-gray-100 rounded-lg max-w-full block">
@@ -489,7 +573,7 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
       {totalPages > 1 && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-ink/40 whitespace-nowrap shrink-0">
-            Hiển thị {globalOffset + 1}–{Math.min(globalOffset + PAGE_SIZE, users.length)} / {users.length}
+            Hiển thị {globalOffset + 1}–{Math.min(globalOffset + PAGE_SIZE, filtered.length)} / {filtered.length}
           </p>
           <div className="flex flex-wrap gap-1">
             <button
