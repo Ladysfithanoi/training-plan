@@ -35,14 +35,13 @@ export function ForgotPasswordForm() {
     setLoading(false)
   }
 
-  // After a successful request we show a neutral confirmation that never
-  // discloses whether the address was actually registered.
+  // The email was confirmed to exist and the link was sent.
   if (sent) {
     return (
       <div className="space-y-5">
         <p className="rounded-lg bg-herb/8 border border-herb/25 px-4 py-3 text-sm text-herb font-medium">
-          Nếu email <strong>{email}</strong> tồn tại trong hệ thống, chúng tôi đã gửi liên kết đặt
-          lại mật khẩu. Vui lòng kiểm tra hộp thư (kể cả mục Spam/Quảng cáo). Liên kết hết hạn sau 1 giờ.
+          Đã gửi liên kết đặt lại mật khẩu tới <strong>{email}</strong>. Vui lòng kiểm tra hộp thư
+          (kể cả mục Spam/Quảng cáo). Liên kết hết hạn sau 1 giờ.
         </p>
         <Link
           href="/login"
