@@ -3,12 +3,34 @@
 // bundle this module into a context where SUPABASE_SERVICE_ROLE_KEY is scrubbed.
 // Reading the env vars and constructing the client directly inside this file
 // guarantees they are evaluated in the Node.js API-route runtime.
+import { randomInt } from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { requireStaff } from '@/lib/auth'
 import { pendingTrialWindow } from '@/lib/trial'
 import { generateMagicToken } from '@/lib/guestToken'
-import { sendEmail, buildWelcomeEmail, buildStaffWelcomeEmail, looksLikeEmail } from '@/lib/email'
+import { sendEmail, buildStaffWelcomeEmail, looksLikeEmail } from '@/lib/email'
+
+// ── Random password generator (server-only) ──────────────────────────────────
+// Staff-side accounts (HLV / Quản trị / Trải nghiệm) get an auto-generated
+// password that is emailed to them, so the admin never has to invent one.
+// Excludes visually ambiguous characters (0/O, 1/l/I) and guarantees at least
+// one upper, one lower and one digit.
+function generatePassword(length = 12): string {
+  const upper  = 'ABCDEFGHJKMNPQRSTUVWXYZ'
+  const lower  = 'abcdefghijkmnpqrstuvwxyz'
+  const digits = '23456789'
+  const all    = upper + lower + digits
+  const pick = (set: string) => set[randomInt(set.length)]
+  const chars = [pick(upper), pick(lower), pick(digits)]
+  while (chars.length < length) chars.push(pick(all))
+  // Fisher–Yates shuffle so the guaranteed chars aren't always in front.
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1)
+    ;[chars[i], chars[j]] = [chars[j], chars[i]]
+  }
+  return chars.join('')
+}
 
 // ── Shared admin-client factory (module-scoped helper, server-only) ──────────
 // Defined here rather than imported from lib so the env-var reads stay inside
@@ -43,13 +65,13 @@ export async function POST(request: Request) {
   }
 
   // ── Parse request body ─────────────────────────────────────────────────────
-  let email: string, password: string, full_name: string | undefined, role: string
+  let email: string, bodyPassword: string | undefined, full_name: string | undefined, role: string
   try {
     const body = await request.json()
-    email     = body.email
-    password  = body.password
-    full_name = body.full_name
-    role      = body.role ?? 'user'
+    email        = body.email
+    bodyPassword = body.password
+    full_name    = body.full_name
+    role         = body.role ?? 'user'
   } catch {
     return NextResponse.json(
       { error: 'Yêu cầu không hợp lệ — body phải là JSON' },
@@ -57,9 +79,9 @@ export async function POST(request: Request) {
     )
   }
 
-  if (!email || !password) {
+  if (!email) {
     return NextResponse.json(
-      { error: 'email và mật khẩu là bắt buộc' },
+      { error: 'email là bắt buộc' },
       { status: 400 },
     )
   }
@@ -73,21 +95,32 @@ export async function POST(request: Request) {
   if (!['user', 'coach', 'admin', 'trial'].includes(role)) role = 'user'
   const createdBy: string | null = isAdmin ? null : caller.id
 
+  // ── Password ───────────────────────────────────────────────────────────────
+  // Staff-side accounts (HLV / Quản trị / Trải nghiệm) get an auto-generated
+  // password (emailed to them). Students keep the coach-provided temporary
+  // password — they don't get an email and sign in via the magic link.
+  const isStaffAccount = role === 'coach' || role === 'admin' || role === 'trial'
+  const password = isStaffAccount ? generatePassword() : (bodyPassword ?? '')
+  if (!password) {
+    return NextResponse.json(
+      { error: 'Mật khẩu là bắt buộc' },
+      { status: 400 },
+    )
+  }
+
   // Trial accounts start switched ON but with the 5-hour clock NOT yet running.
   // The window begins counting from the tester's FIRST login (see
   // /api/auth/login), so preparing the account in advance doesn't burn the time.
   const trialFields = role === 'trial' ? pendingTrialWindow() : {}
 
   // ── Welcome-email plan ─────────────────────────────────────────────────────
-  // Send a welcome email when the address looks real (a bogus / placeholder
-  // email means no send — "nếu email đó không tồn tại thì không gửi gì hết").
-  // Staff (coach/admin) log in at /login with email+password, so they get NO
-  // magic token. Athletes (user/trial) get a pre-minted passwordless magic
-  // token so we can email them a ready-to-use login link; that token can also
-  // be minted lazily later via /api/magic-link.
-  const isStaffAccount = role === 'coach' || role === 'admin'
-  const willEmail = looksLikeEmail(email)
-  const magicToken = willEmail && !isStaffAccount ? generateMagicToken(full_name ?? email) : null
+  // Only staff-side accounts (HLV / Quản trị / Trải nghiệm) receive a welcome
+  // email — and only when the address looks real. Students get NO email (their
+  // coach shares the magic link manually via "Gửi link"). Staff log in at
+  // /login with email+password. Students still get a pre-minted magic token so
+  // that "Gửi link" is instant; it can also be minted lazily via /api/magic-link.
+  const willEmail = isStaffAccount && looksLikeEmail(email)
+  const magicToken = role === 'user' ? generateMagicToken(full_name ?? email) : null
 
   // ── Step 1: Create auth user (bypasses signup restrictions) ───────────────
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -138,25 +171,21 @@ export async function POST(request: Request) {
   }
 
   // ── Step 3: Send the welcome email (best-effort, never blocks creation) ─────
-  // Staff get a login-page link + their email/temp-password; athletes get their
-  // passwordless magic link. A failure here must NOT fail the request — the
-  // account already exists. We surface the outcome in `emailed` for the UI.
+  // Staff-side accounts get a login-page link + their email/auto-password with
+  // sign-in instructions. A failure here must NOT fail the request — the account
+  // already exists. We surface the outcome in `emailed` for the UI.
   let emailed = false
   if (willEmail) {
     const origin = new URL(request.url).origin
-    const { subject, html } = isStaffAccount
-      ? buildStaffWelcomeEmail({
-          fullName: full_name ?? null,
-          email,
-          password,
-          loginUrl: `${origin}/login`,
-          isAdmin:  role === 'admin',
-        })
-      : buildWelcomeEmail({
-          fullName: full_name ?? null,
-          loginUrl: `${origin}/p/${magicToken}`,
-          siteUrl:  origin,
-        })
+    const roleLabel =
+      role === 'admin' ? 'Quản trị viên' : role === 'coach' ? 'Huấn luyện viên' : 'Trải nghiệm'
+    const { subject, html } = buildStaffWelcomeEmail({
+      fullName: full_name ?? null,
+      email,
+      password,
+      loginUrl: `${origin}/login`,
+      roleLabel,
+    })
     const result = await sendEmail({ to: email, subject, html })
     emailed = result.sent
     if (!result.sent && result.error) {
@@ -166,8 +195,13 @@ export async function POST(request: Request) {
 
   // ── Step 4: Return the confirmed profile row ───────────────────────────────
   // The frontend adds this directly to the users list — the row is guaranteed
-  // committed because .select().single() waited for the write to complete.
-  return NextResponse.json({ profile, emailed }, { status: 201 })
+  // committed because .select().single() waited for the write to complete. For
+  // staff-side accounts we also return the auto-generated password so the admin
+  // has it as a backup (and can relay it if the email couldn't be sent).
+  return NextResponse.json(
+    { profile, emailed, ...(isStaffAccount ? { password } : {}) },
+    { status: 201 },
+  )
 }
 
 /** GET /api/admin/users — list profiles (admins: all; coaches: their students) */

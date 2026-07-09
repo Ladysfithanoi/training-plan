@@ -146,12 +146,31 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
       const data = await res.json()
       setUsers(prev => [data.profile, ...prev])
       setCreateOpen(false)
-      // Cho HLV biết email mời đã được gửi hay chưa.
-      setCreateNotice(
-        data.emailed
-          ? `Đã tạo tài khoản và gửi email link đăng nhập tới ${data.profile.email}.`
-          : 'Đã tạo tài khoản. (Chưa gửi được email link đăng nhập — kiểm tra email học viên hoặc cấu hình gửi mail.)',
-      )
+      // Thông báo kết quả theo từng loại tài khoản:
+      //  • HLV / Trải nghiệm / Quản trị → gửi email kèm mật khẩu tự tạo.
+      //  • Học viên → không gửi email; HLV dùng "🔗 Gửi link" để chia sẻ.
+      const p = data.profile
+      const roleLabels: Record<string, string> = {
+        user: 'Học viên', coach: 'HLV', admin: 'Quản trị viên', trial: 'Trải nghiệm',
+      }
+      const who = roleLabels[p.role] ?? 'tài khoản'
+      if (data.emailed) {
+        setCreateNotice(
+          `Đã tạo tài khoản ${who} và gửi email hướng dẫn đăng nhập (kèm mật khẩu) tới ${p.email}.` +
+            (data.password ? ` Mật khẩu: ${data.password}` : ''),
+        )
+      } else if (data.password) {
+        // Tài khoản nhân sự nhưng email chưa gửi được — đưa mật khẩu cho admin.
+        setCreateNotice(
+          `Đã tạo tài khoản ${who}. Chưa gửi được email — hãy gửi thủ công cho họ. ` +
+            `Email: ${p.email} · Mật khẩu: ${data.password}`,
+        )
+      } else {
+        setCreateNotice(
+          `Đã tạo tài khoản học viên ${p.full_name ?? p.email}. ` +
+            `Dùng nút “🔗 Gửi link” để chia sẻ đường dẫn truy cập cho học viên.`,
+        )
+      }
       setNewEmail('')
       setNewPassword('')
       setNewName('')
@@ -624,14 +643,23 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
             placeholder="email@example.com"
             required
           />
-          <Input
-            label="Mật khẩu tạm thời"
-            type="password"
-            value={newPassword}
-            onChange={e => setNewPassword(e.target.value)}
-            placeholder="Tối thiểu 8 ký tự"
-            required
-          />
+          {/* Học viên: HLV tự đặt mật khẩu tạm (không gửi email).
+              HLV / Trải nghiệm / Quản trị: mật khẩu được tạo tự động & gửi qua email. */}
+          {newRole === 'user' ? (
+            <Input
+              label="Mật khẩu tạm thời"
+              type="password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="Tối thiểu 8 ký tự"
+              required
+            />
+          ) : (
+            <div className="rounded-lg border border-herb/25 bg-herb/5 px-3 py-2.5 text-xs text-ink/60">
+              🔐 Mật khẩu sẽ được <strong>tạo tự động</strong> và gửi kèm hướng dẫn đăng nhập
+              tới email này.
+            </div>
+          )}
           {isAdmin && (
             <Select
               label="Vai trò"
@@ -648,7 +676,7 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
               variant="primary"
               loading={creating}
               onClick={handleCreate}
-              disabled={!newEmail || !newPassword}
+              disabled={!newEmail || (newRole === 'user' && !newPassword)}
               className="flex-1"
             >
               Tạo tài khoản

@@ -67,71 +67,21 @@ export async function sendEmail(opts: {
 }
 
 /**
- * Builds the "your account is ready" welcome email: a friendly note telling the
- * athlete an account was created for them, plus their passwordless magic link
- * (the de-facto login link in this app — open it and you're in, no password).
- */
-export function buildWelcomeEmail(opts: {
-  fullName: string | null
-  loginUrl: string
-  siteUrl: string
-}): { subject: string; html: string } {
-  const name = opts.fullName?.trim() || 'bạn'
-  const subject = `Tài khoản ${BRAND} của bạn đã sẵn sàng`
-
-  const html = `
-  <div style="margin:0;padding:24px;background:#f5f5f0;font-family:'Segoe UI',Helvetica,Arial,sans-serif;color:#1c1c1a;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e3da;">
-      <tr>
-        <td style="padding:28px 32px 8px;">
-          <p style="margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#5b7d5b;font-weight:600;">${BRAND}</p>
-          <h1 style="margin:12px 0 0;font-size:22px;line-height:1.3;color:#1c1c1a;">Chào ${escapeHtml(name)}, tài khoản của bạn đã được tạo 🎉</h1>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:12px 32px 0;font-size:15px;line-height:1.65;color:#3a3a35;">
-          <p style="margin:0 0 16px;">Huấn luyện viên của bạn vừa tạo một tài khoản trên hệ thống <strong>${BRAND}</strong> để bạn theo dõi giáo án và ghi lại từng buổi tập.</p>
-          <p style="margin:0 0 22px;">Bấm nút bên dưới để truy cập ngay — <strong>không cần mật khẩu</strong>, link này đã đăng nhập sẵn cho bạn:</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:0 32px 8px;">
-          <a href="${opts.loginUrl}" style="display:inline-block;background:#5b7d5b;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 26px;border-radius:10px;">Mở giáo án của tôi →</a>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:14px 32px 0;font-size:13px;line-height:1.6;color:#6b6b63;">
-          <p style="margin:0 0 6px;">Nếu nút không hoạt động, sao chép liên kết này vào trình duyệt:</p>
-          <p style="margin:0;word-break:break-all;"><a href="${opts.loginUrl}" style="color:#5b7d5b;">${opts.loginUrl}</a></p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:24px 32px 28px;border-top:1px solid #eeeee7;margin-top:16px;">
-          <p style="margin:18px 0 0;font-size:12px;color:#9a9a90;">Bạn nhận được email này vì có người đã tạo tài khoản cho bạn tại <a href="${opts.siteUrl}" style="color:#9a9a90;">${stripScheme(opts.siteUrl)}</a>. Nếu bạn không mong đợi email này, có thể bỏ qua nó.</p>
-        </td>
-      </tr>
-    </table>
-  </div>`
-
-  return { subject, html }
-}
-
-/**
- * Builds the welcome email for a STAFF account (coach / admin). Unlike athletes,
- * staff log in at the real login page with email + password — there is no
- * passwordless magic link for them. So this email carries the login URL, their
- * email (login id) and the temporary password the admin set, with a nudge to
- * change it after first sign-in.
+ * Builds the welcome email for a STAFF-side account (coach / admin / trial).
+ * These accounts log in at the real login page with email + password. The email
+ * carries the login URL, their email (login id) and the auto-generated password,
+ * with a nudge to change it after first sign-in. `roleLabel` is the Vietnamese
+ * label shown in the subject/heading (e.g. "Huấn luyện viên", "Trải nghiệm").
  */
 export function buildStaffWelcomeEmail(opts: {
   fullName: string | null
   email: string
   password: string
   loginUrl: string
-  isAdmin: boolean
+  roleLabel: string
 }): { subject: string; html: string } {
   const name = opts.fullName?.trim() || 'bạn'
-  const roleLabel = opts.isAdmin ? 'Quản trị viên' : 'Huấn luyện viên'
+  const roleLabel = opts.roleLabel
   const subject = `Tài khoản ${roleLabel} ${BRAND} của bạn đã sẵn sàng`
 
   const html = `
