@@ -133,6 +133,54 @@ export function buildStaffWelcomeEmail(opts: {
   return { subject, html }
 }
 
+/**
+ * Builds the password-reset email. Sent when someone uses "Quên mật khẩu?" on
+ * the login page. Carries a single big button + fallback link to the reset page
+ * (which holds a short-lived signed token) and states the 1-hour expiry.
+ */
+export function buildPasswordResetEmail(opts: {
+  fullName: string | null
+  resetUrl: string
+}): { subject: string; html: string } {
+  const name = opts.fullName?.trim() || 'bạn'
+  const subject = `Đặt lại mật khẩu ${BRAND}`
+
+  const html = `
+  <div style="margin:0;padding:24px;background:#f5f5f0;font-family:'Segoe UI',Helvetica,Arial,sans-serif;color:#1c1c1a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e3da;">
+      <tr>
+        <td style="padding:28px 32px 8px;">
+          <p style="margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#5b7d5b;font-weight:600;">${BRAND}</p>
+          <h1 style="margin:12px 0 0;font-size:22px;line-height:1.3;color:#1c1c1a;">Đặt lại mật khẩu 🔒</h1>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:12px 32px 0;font-size:15px;line-height:1.65;color:#3a3a35;">
+          <p style="margin:0 0 16px;">Chào ${escapeHtml(name)}, chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn. Bấm nút bên dưới để chọn mật khẩu mới.</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 32px 8px;">
+          <a href="${opts.resetUrl}" style="display:inline-block;background:#5b7d5b;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:13px 26px;border-radius:10px;">Đặt lại mật khẩu →</a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:14px 32px 0;font-size:13px;line-height:1.6;color:#6b6b63;">
+          <p style="margin:0 0 6px;">Hoặc mở liên kết: <a href="${opts.resetUrl}" style="color:#5b7d5b;word-break:break-all;">${opts.resetUrl}</a></p>
+          <p style="margin:10px 0 0;">Liên kết này sẽ <strong>hết hạn sau 1 giờ</strong>. Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này — mật khẩu của bạn vẫn giữ nguyên.</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:24px 32px 28px;border-top:1px solid #eeeee7;">
+          <p style="margin:18px 0 0;font-size:12px;color:#9a9a90;">Email tự động từ hệ thống ${BRAND}. Vì lý do bảo mật, đừng chuyển tiếp email này cho người khác.</p>
+        </td>
+      </tr>
+    </table>
+  </div>`
+
+  return { subject, html }
+}
+
 /** Minimal HTML-escape for interpolated user text (names). */
 function escapeHtml(value: string): string {
   return value

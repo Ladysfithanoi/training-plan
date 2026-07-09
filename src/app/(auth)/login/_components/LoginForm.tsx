@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -57,6 +58,15 @@ export function LoginForm() {
         placeholder="••••••••"
         error={error ?? undefined}
       />
+
+      <div className="flex justify-end -mt-2">
+        <Link
+          href="/forgot-password"
+          className="text-sm font-medium text-amber hover:underline"
+        >
+          Quên mật khẩu?
+        </Link>
+      </div>
 
       <Button type="submit" loading={loading} className="w-full" size="lg">
         Đăng nhập

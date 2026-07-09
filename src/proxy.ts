@@ -44,6 +44,9 @@ export async function proxy(request: NextRequest) {
   // Public paths that never need authentication
   const isPublicPath =
     path.startsWith('/login') ||
+    // Password recovery — reached without a session (user forgot their password).
+    path.startsWith('/forgot-password') ||
+    path.startsWith('/reset-password') ||
     path.startsWith('/api/auth') ||
     // Magic-link guest program view + its API — validated by token, not a session.
     // Recipients (students) must reach these WITHOUT logging in.
