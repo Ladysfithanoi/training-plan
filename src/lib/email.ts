@@ -1,13 +1,15 @@
-// Server-only email helper built directly on Resend's HTTP API — no SDK
-// dependency, so it adds nothing to the bundle and runs in any Node API route.
+// Server-only email helper built on Gmail SMTP via nodemailer — the same
+// approach as the learning-plan app, so both share one Gmail App Password
+// instead of a separate Resend account. Runs only in the Node.js API-route
+// runtime (nodemailer needs Node, not the edge runtime).
 //
 // Sending is intentionally best-effort: every caller must treat a failed or
 // skipped send as a non-event and never let it break the main flow (e.g. an
 // account is still created even if the welcome email can't go out). When
-// RESEND_API_KEY / EMAIL_FROM are unset (local dev, preview) every call is a
-// silent no-op.
+// GMAIL_USER / GMAIL_APP_PASSWORD are unset (local dev, preview) every call is
+// a silent no-op.
 
-const RESEND_ENDPOINT = 'https://api.resend.com/emails'
+import nodemailer from 'nodemailer'
 
 /** App / brand name used in subject lines and email chrome. */
 const BRAND = 'Kế hoạch Tập luyện'
@@ -24,45 +26,46 @@ export function looksLikeEmail(value: string | null | undefined): boolean {
 
 type SendResult = { sent: boolean; skipped?: string; error?: string }
 
+/**
+ * Builds the "from" header. Prefer an explicit EMAIL_FROM (kept for backward
+ * compatibility / a nice display name), otherwise fall back to the Gmail
+ * account itself. Note Gmail rewrites the envelope sender to the authenticated
+ * account regardless, so a fancy address here is display-only.
+ */
+function fromHeader(gmailUser: string): string {
+  return process.env.EMAIL_FROM?.trim() || `${BRAND} <${gmailUser}>`
+}
+
 /** Low-level send. Returns a result object instead of throwing. */
 export async function sendEmail(opts: {
   to: string
   subject: string
   html: string
 }): Promise<SendResult> {
-  const apiKey = process.env.RESEND_API_KEY
-  const from   = process.env.EMAIL_FROM
+  const user = process.env.GMAIL_USER
+  const pass = process.env.GMAIL_APP_PASSWORD
 
   // Not configured → quietly do nothing. Keeps dev/preview from erroring.
-  if (!apiKey || !from) return { sent: false, skipped: 'email-not-configured' }
+  if (!user || !pass) return { sent: false, skipped: 'email-not-configured' }
   // Bogus / placeholder recipient → skip ("Nếu email đó không tồn tại thì
   // không gửi gì hết, đỡ phải lọc").
   if (!looksLikeEmail(opts.to)) return { sent: false, skipped: 'invalid-recipient' }
 
   try {
-    const res = await fetch(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from,
-        to: opts.to,
-        subject: opts.subject,
-        html: opts.html,
-      }),
+    const transport = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user, pass },
     })
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      console.error('[sendEmail] Resend rejected:', res.status, detail)
-      return { sent: false, error: `resend-${res.status}` }
-    }
+    await transport.sendMail({
+      from: fromHeader(user),
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+    })
     return { sent: true }
   } catch (err) {
-    console.error('[sendEmail] Network error:', err)
-    return { sent: false, error: 'network' }
+    console.error('[sendEmail] Gmail send failed:', err)
+    return { sent: false, error: 'smtp' }
   }
 }
 
