@@ -55,6 +55,8 @@ interface GuestTrainingViewProps {
   prevSuggestion:        string | null
   phaseWeekType:         WeekType
   todayCompletedSession: (WorkoutSession & { sets: WorkoutSet[] }) | null
+  /** True when the last meso just expired and the whole program is now completed. */
+  programCompleted?:     boolean
 }
 
 // ─── Survey options ───────────────────────────────────────────────────────────
@@ -160,6 +162,7 @@ export function GuestTrainingView({
   prevSuggestion,
   phaseWeekType,
   todayCompletedSession,
+  programCompleted = false,
 }: GuestTrainingViewProps) {
   const router = useRouter()
 
@@ -430,10 +433,18 @@ export function GuestTrainingView({
           <p className="text-xs font-semibold uppercase tracking-widest text-amber mb-2">Chương trình Tập luyện Cá nhân</p>
           <h1 className="text-3xl font-bold text-ink">{athleteName}</h1>
         </div>
-        <div className="rounded-2xl border border-ink/8 bg-white p-5 text-center">
-          <p className="text-sm text-ink/40">Chưa có chương trình tập luyện được giao.</p>
-          <p className="text-xs text-ink/30 mt-1">Vui lòng liên hệ huấn luyện viên.</p>
-        </div>
+        {programCompleted ? (
+          <div className="rounded-2xl border border-herb/30 bg-herb/8 p-5 text-center">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-herb mb-1">Hoàn thành chương trình</p>
+            <p className="text-sm text-ink/70">Chúc mừng — bạn đã hoàn thành tất cả các giai đoạn (Meso) của khối tập luyện này.</p>
+            <p className="text-xs text-ink/40 mt-1">Vui lòng liên hệ huấn luyện viên để nhận giáo án tiếp theo.</p>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-ink/8 bg-white p-5 text-center">
+            <p className="text-sm text-ink/40">Chưa có chương trình tập luyện được giao.</p>
+            <p className="text-xs text-ink/30 mt-1">Vui lòng liên hệ huấn luyện viên.</p>
+          </div>
+        )}
         <Footer />
       </div>
     )

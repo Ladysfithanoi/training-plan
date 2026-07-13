@@ -67,6 +67,8 @@ interface CoachTrainingViewProps {
   phaseWeekType:           WeekType
   /** Server-prefetched completed session for today (with full sets). Non-null = grid is locked on mount. */
   todayCompletedSession:   (WorkoutSession & { sets: WorkoutSet[] }) | null
+  /** True when the last meso just expired and the whole program is now completed. */
+  programCompleted?:       boolean
 }
 
 // ─── Survey options ───────────────────────────────────────────────────────────
@@ -215,6 +217,7 @@ export function CoachTrainingView({
   prevSuggestion,
   phaseWeekType,
   todayCompletedSession,
+  programCompleted = false,
 }: CoachTrainingViewProps) {
   const router = useRouter()
 
@@ -623,7 +626,21 @@ export function CoachTrainingView({
   }, [activeWeek, activeDayId])
 
   // ── Guard ──────────────────────────────────────────────────────────────────
-  if (!userProgram) return <CoachProgramSelector availableBlocks={availableBlocks} />
+  if (!userProgram) {
+    return (
+      <div className="space-y-5">
+        {programCompleted && (
+          <div className="rounded-2xl border border-herb/30 bg-herb/8 px-5 py-4">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-herb mb-1">Hoàn thành chương trình</p>
+            <p className="text-sm text-ink/70">
+              Chúc mừng — bạn đã hoàn thành tất cả các giai đoạn (Meso) của khối tập luyện này. Chọn một khối mới bên dưới để tiếp tục.
+            </p>
+          </div>
+        )}
+        <CoachProgramSelector availableBlocks={availableBlocks} />
+      </div>
+    )
+  }
 
   // ── Lazy session creation ──────────────────────────────────────────────────
   // Called by autoSaveCell before any API write. Creates exactly one session
