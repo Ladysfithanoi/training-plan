@@ -279,3 +279,87 @@ export function computeIntraSessionGuidance(input: {
         `cho các hiệp còn lại; reps giảm dần do mệt mỏi là bình thường.`,
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Week-over-week progression cue — "tuần này nên giữ / tăng / giảm tạ?"
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Turns LAST week's average performance on one lift into an actionable load
+ * decision for THIS week. Shown inline next to the "Tuần N đã tập …" reference
+ * so the athlete doesn't have to interpret the numbers themselves.
+ *
+ * Same rep-range logic as the intra-session guidance, applied to the weekly
+ * average instead of set 1:
+ *   • avg reps below the range          → load was too heavy → giảm tạ
+ *   • avg reps at/over the range top and effort on-target-or-easier → tăng tạ
+ *   • otherwise (inside range, or top-but-too-hard) → giữ tạ, cố thêm reps
+ *
+ * Not meaningful for AMRAP or peaking/%1RM weeks — callers should skip those.
+ */
+export type ProgressionAction = 'increase' | 'hold' | 'decrease'
+
+export interface ProgressionCue {
+  action: ProgressionAction
+  /** Suggested load for this week (null when last week had no weight logged). */
+  suggestedWeightKg: number | null
+  /** Short Vietnamese action line for display. */
+  message: string
+}
+
+export function buildProgressionCue(input: {
+  avgKg:     number | null
+  avgReps:   number
+  avgRir:    number | null
+  repMin:    number
+  repMax:    number
+  rirTarget: number
+}): ProgressionCue {
+  const { avgKg, avgReps, avgRir, repMin, repMax, rirTarget } = input
+  const hasKg = avgKg != null && avgKg > 0
+
+  // ── Below range → too heavy last week → reduce ────────────────────────────
+  if (avgReps < repMin) {
+    const under = repMin - avgReps
+    let suggested: number | null = null
+    if (hasKg) {
+      suggested = roundToHalfKg(avgKg! * (1 - PCT_PER_REP * under))
+      if (suggested >= avgKg!) suggested = roundToHalfKg(avgKg! - 0.5)
+      if (suggested <= 0) suggested = null
+    }
+    return {
+      action: 'decrease',
+      suggestedWeightKg: suggested,
+      message: suggested != null
+        ? `Tuần này giảm về ~${fmtKg(suggested)} kg để vào lại dải ${repMin}–${repMax} reps.`
+        : `Tuần này giảm nhẹ tạ để vào lại dải ${repMin}–${repMax} reps.`,
+    }
+  }
+
+  // ── At/over top of range and effort ok → increase ─────────────────────────
+  const rirOk = avgRir == null || avgRir <= rirTarget
+  if (avgReps >= repMax && rirOk) {
+    const over = avgReps - repMax
+    const pct  = over > 0 ? PCT_PER_REP * over : 0.025   // ≥ +2.5% even when exactly at top
+    let suggested: number | null = null
+    if (hasKg) {
+      suggested = roundToHalfKg(avgKg! * (1 + pct))
+      if (suggested <= avgKg!) suggested = roundToHalfKg(avgKg! + 0.5)
+    }
+    return {
+      action: 'increase',
+      suggestedWeightKg: suggested,
+      message: suggested != null
+        ? `Tuần này tăng lên ~${fmtKg(suggested)} kg (đã đạt đỉnh dải rep).`
+        : `Tuần này tăng tạ nhẹ — đã đạt đỉnh dải rep.`,
+    }
+  }
+
+  // ── Inside range (or top-but-too-hard) → hold, chase reps ─────────────────
+  return {
+    action: 'hold',
+    suggestedWeightKg: hasKg ? avgKg! : null,
+    message: hasKg
+      ? `Tuần này giữ ${fmtKg(avgKg!)} kg, cố thêm 1–2 reps mỗi hiệp trước khi tăng.`
+      : `Tuần này giữ nguyên tạ, cố thêm 1–2 reps mỗi hiệp trước khi tăng.`,
+  }
+}

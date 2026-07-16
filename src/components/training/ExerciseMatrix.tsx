@@ -3,6 +3,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { cn } from '@/lib/utils'
 import { computeIntraSessionGuidance, firstSetTargetHint } from '@/lib/autoregulation'
+import type { ProgressionCue } from '@/lib/autoregulation'
 import { TechniqueButton } from './TechniqueButton'
 import type { PhaseExercise } from '@/types'
 
@@ -49,8 +50,10 @@ interface ExerciseMatrixProps {
    * Previous-week reference shown inline on each exercise: e.g. in week 3 it
    * reminds you that in week 2 you did "12.5 kg × 10 lần" for that same lift.
    * `labels` is keyed by exercise_id; only exercises with logged data appear.
+   * `cues` (optional, same keying) carries this week's keep/increase/decrease
+   * recommendation derived from that reference.
    */
-  prevWeekRef?:        { week: number; labels: Record<string, string> }
+  prevWeekRef?:        { week: number; labels: Record<string, string>; cues?: Record<string, ProgressionCue> }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,6 +113,13 @@ function guidanceStyle(g: NonNullable<ReturnType<typeof guidanceFor>>) {
   const text = g.status === 'in_range' ? 'text-herb-deep' : 'text-amber'
   const icon = g.status === 'too_light' ? '⬆️' : g.status === 'too_heavy' ? '⬇️' : g.progressReady ? '🎯' : '✓'
   return { box, text, icon }
+}
+
+/** Icon + accent colour for this week's keep/increase/decrease cue. */
+function cueStyle(cue: ProgressionCue) {
+  if (cue.action === 'increase') return { icon: '⬆️', text: 'text-herb-deep', chip: 'bg-herb/8 border-herb/25' }
+  if (cue.action === 'decrease') return { icon: '⬇️', text: 'text-danger/80', chip: 'bg-danger/6 border-danger/20' }
+  return { icon: '➡️', text: 'text-ink/70', chip: 'bg-ink/4 border-ink/12' }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -271,6 +281,19 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                           📊 Tuần {prevWeekRef.week} đã tập {prevWeekRef.labels[exerciseId]}
                         </p>
                       )}
+                      {prevWeekRef?.cues?.[exerciseId] && (() => {
+                        const cue = prevWeekRef.cues[exerciseId]
+                        const cs  = cueStyle(cue)
+                        return (
+                          <p className={cn(
+                            'mt-1 flex items-start gap-1 rounded-md border px-1.5 py-1 text-[10px] font-semibold leading-snug',
+                            cs.chip, cs.text,
+                          )}>
+                            <span className="shrink-0 leading-none">{cs.icon}</span>
+                            <span>{cue.message}</span>
+                          </p>
+                        )
+                      })()}
                     </td>
                     <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')} style={{ width: 96 }} title={targetTip}>
                       <p className="font-mono text-[11px] text-ink/65 whitespace-nowrap">{targetLabelOf(pe)}</p>
@@ -434,7 +457,7 @@ interface MobileFocusProps {
   onSaveSession:       () => void
   saveDisabled:        boolean
   readOnly:            boolean
-  prevWeekRef?:        { week: number; labels: Record<string, string> }
+  prevWeekRef?:        { week: number; labels: Record<string, string>; cues?: Record<string, ProgressionCue> }
 }
 
 function MobileFocus(p: MobileFocusProps) {
@@ -505,12 +528,24 @@ function MobileFocus(p: MobileFocusProps) {
 
         {/* previous-week reference — "tuần trước bài này bạn tập …" */}
         {p.prevWeekRef?.labels[exerciseId] && (
-          <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5 flex items-center gap-2">
-            <span className="text-base shrink-0">📊</span>
-            <p className="text-sm text-ink/75">
-              <span className="font-semibold text-amber">Tuần {p.prevWeekRef.week} đã tập</span>{' '}
-              <span className="font-mono font-semibold">{p.prevWeekRef.labels[exerciseId]}</span>
-            </p>
+          <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-base shrink-0">📊</span>
+              <p className="text-sm text-ink/75">
+                <span className="font-semibold text-amber">Tuần {p.prevWeekRef.week} đã tập</span>{' '}
+                <span className="font-mono font-semibold">{p.prevWeekRef.labels[exerciseId]}</span>
+              </p>
+            </div>
+            {p.prevWeekRef.cues?.[exerciseId] && (() => {
+              const cue = p.prevWeekRef!.cues![exerciseId]
+              const cs  = cueStyle(cue)
+              return (
+                <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2', cs.chip)}>
+                  <span className="text-base leading-none shrink-0">{cs.icon}</span>
+                  <p className={cn('text-sm font-semibold leading-snug', cs.text)}>{cue.message}</p>
+                </div>
+              )
+            })()}
           </div>
         )}
 

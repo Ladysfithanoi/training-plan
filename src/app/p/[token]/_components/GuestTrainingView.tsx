@@ -7,7 +7,8 @@ import type {
   PhaseExercise, UserProgram, WeekType, WorkoutSession,
   SessionSurvey, SurveyPerformance, SurveyRirFeel, SurveyRecovery, WorkoutSet,
 } from '@/types'
-import { buildGuestSuggestion } from '@/lib/autoregulation'
+import { buildGuestSuggestion, buildProgressionCue } from '@/lib/autoregulation'
+import type { ProgressionCue } from '@/lib/autoregulation'
 import { resolveWeekExercises } from '@/lib/phaseWeeks'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
 import { extractSuggestionFromNotes, extractSurveyFromNotes } from '@/lib/sessionNotes'
@@ -127,7 +128,7 @@ function readSessionSuggestion(s: SessionLike | null | undefined): string {
   return s?.next_week_suggestion ?? extractSuggestionFromNotes(s?.notes)
 }
 
-interface ExAverage { avgKg: number | null; avgReps: number; count: number }
+interface ExAverage { avgKg: number | null; avgReps: number; avgRir: number | null; count: number }
 
 /** Average working-set weight & reps for one exercise across a given week. */
 function averageForWeekExercise(
@@ -145,7 +146,11 @@ function averageForWeekExercise(
     ? Math.round((kgSets.reduce((a, s) => a + (s.weight_kg ?? 0), 0) / kgSets.length) * 4) / 4
     : null
   const avgReps = Math.round(sets.reduce((a, s) => a + (s.actual_reps ?? 0), 0) / sets.length)
-  return { avgKg, avgReps, count: sets.length }
+  const rirSets = sets.filter(s => s.rir != null)
+  const avgRir = rirSets.length
+    ? Math.round(rirSets.reduce((a, s) => a + (s.rir ?? 0), 0) / rirSets.length)
+    : null
+  return { avgKg, avgReps, avgRir, count: sets.length }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -650,14 +655,27 @@ export function GuestTrainingView({
   const prevWeekRef = prevWeek >= 1
     ? (() => {
         const labels: Record<string, string> = {}
+        const cues: Record<string, ProgressionCue> = {}
         for (const pe of sortedRows) {
           const avg = averageForWeekExercise(weekSessions, prevWeek, pe.exercise_id)
           if (avg) {
             labels[pe.exercise_id] =
               `${avg.avgKg != null ? `${avg.avgKg}kg` : '—'} × ${avg.avgReps} reps`
+            // This week's keep/increase/decrease cue — rep-range logic doesn't
+            // apply to AMRAP or peaking/%1RM weeks, so skip those.
+            if (!pe.is_amrap && !isPeaking) {
+              cues[pe.exercise_id] = buildProgressionCue({
+                avgKg:     avg.avgKg,
+                avgReps:   avg.avgReps,
+                avgRir:    avg.avgRir,
+                repMin:    pe.target_rep_min,
+                repMax:    pe.target_rep_max,
+                rirTarget: pe.rir_target,
+              })
+            }
           }
         }
-        return Object.keys(labels).length > 0 ? { week: prevWeek, labels } : undefined
+        return Object.keys(labels).length > 0 ? { week: prevWeek, labels, cues } : undefined
       })()
     : undefined
 
