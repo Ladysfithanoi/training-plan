@@ -17,6 +17,7 @@
 import { useState, useEffect } from 'react'
 import { ProgramBuilder } from './ProgramBuilder'
 import { PhaseExerciseBuilder } from './PhaseExerciseBuilder'
+import { PhaseExerciseViewer } from './PhaseExerciseViewer'
 import type { TrainingBlock, Exercise, MovementPattern, Phase } from '@/types'
 
 type BlockWithPhases = TrainingBlock & { phases: Phase[] }
@@ -94,14 +95,12 @@ export function ProgramsWorkspace({ blocks: initialBlocks, exercises, patterns, 
               />
             </>
           ) : (
-            <div className="rounded-xl border border-amber/20 bg-amber/5 px-5 py-4">
-              <p className="text-sm font-semibold text-amber/90">Giáo án dùng chung</p>
-              <p className="text-sm text-ink/55 mt-1">
-                Đây là giáo án do người khác tạo — bạn chỉ có thể xem, không thể chỉnh sửa
-                cấu hình bài tập. Bạn vẫn có thể <strong>giao</strong> giáo án này cho học viên
-                của mình ở trang <strong>Danh sách Học viên</strong>.
-              </p>
-            </div>
+            // Không có quyền chỉnh (giáo án của người khác, hoặc tài khoản trải
+            // nghiệm) → vẫn xem được toàn bộ bài tập bên trong, chỉ là read-only.
+            <PhaseExerciseViewer
+              blocks={blocks}
+              selectedBlockId={selectedBlockId}
+            />
           )}
         </section>
       )}
