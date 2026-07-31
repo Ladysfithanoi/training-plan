@@ -101,6 +101,69 @@ const RECOVERY_VI: Record<string, string> = {
   sore:   '🤕 Đau nhức',
 }
 
+// ── Pagination ────────────────────────────────────────────────────────────────
+const SESSIONS_PER_PAGE = 5
+const WEEKS_PER_PAGE    = 5
+
+function PaginationFooter({
+  currentPage, totalPages, offset, pageSize, totalItems, unit, onChange, className,
+}: {
+  currentPage: number
+  totalPages: number
+  offset: number
+  pageSize: number
+  totalItems: number
+  unit: string
+  onChange: (page: number) => void
+  className?: string
+}) {
+  if (totalPages <= 1) return null
+
+  return (
+    <div className={cn('flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between', className)}>
+      <p className="text-xs text-ink/40 whitespace-nowrap shrink-0">
+        Hiển thị {offset + 1}–{Math.min(offset + pageSize, totalItems)} / {totalItems} {unit}
+      </p>
+      <div className="flex flex-wrap gap-1">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(1, currentPage - 1))}
+          disabled={currentPage === 1}
+          aria-label="Trang trước"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-ink/15 text-ink/50 hover:text-ink hover:border-ink/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          ← Trước
+        </button>
+        {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            aria-current={p === currentPage ? 'page' : undefined}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-xs font-medium border transition-all',
+              p === currentPage
+                ? 'border-ink bg-ink text-paper'
+                : 'border-ink/15 text-ink/50 hover:text-ink hover:border-ink/30',
+            )}
+          >
+            {p}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(totalPages, currentPage + 1))}
+          disabled={currentPage === totalPages}
+          aria-label="Trang sau"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-ink/15 text-ink/50 hover:text-ink hover:border-ink/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          Tiếp →
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function AthleteDetailTabs({
   userProgram,
   phaseExercises,
@@ -268,7 +331,25 @@ export function AthleteDetailTabs({
 
   // ── Volume tab ─────────────────────────────────────────────────────────────
   function VolumeTab({ weeklyVolumeData }: { weeklyVolumeData: WeeklyVolumePoint[] }) {
+    const [weekPage, setWeekPage] = useState(1)
     const summary = computeAllTimeSummary(weeklyVolumeData)
+
+    // Tuần mới nhất lên đầu — tính Δ trên toàn bộ chuỗi trước khi cắt trang,
+    // để dòng đầu mỗi trang vẫn so được với tuần liền trước.
+    const orderedWeeks = [...weeklyVolumeData].reverse()
+    const weekRows = orderedWeeks.map((w, i) => {
+      const prev  = orderedWeeks[i + 1]
+      const delta = prev ? w.totalVolumeKg - prev.totalVolumeKg : null
+      const pct   = prev && prev.totalVolumeKg > 0
+        ? ((delta! / prev.totalVolumeKg) * 100).toFixed(1)
+        : null
+      return { w, delta, pct }
+    })
+
+    const weekTotalPages  = Math.max(1, Math.ceil(weekRows.length / WEEKS_PER_PAGE))
+    const weekCurrentPage = Math.min(weekPage, weekTotalPages)
+    const weekOffset      = (weekCurrentPage - 1) * WEEKS_PER_PAGE
+    const weekPageRows    = weekRows.slice(weekOffset, weekOffset + WEEKS_PER_PAGE)
 
     const statCards: { label: string; value: string; sub?: string }[] = [
       {
@@ -358,12 +439,7 @@ export function AthleteDetailTabs({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink/5">
-                  {[...weeklyVolumeData].reverse().map((w, i, arr) => {
-                    const prev = arr[i + 1]
-                    const delta = prev ? w.totalVolumeKg - prev.totalVolumeKg : null
-                    const pct   = prev && prev.totalVolumeKg > 0
-                      ? ((delta! / prev.totalVolumeKg) * 100).toFixed(1)
-                      : null
+                  {weekPageRows.map(({ w, delta, pct }) => {
                     return (
                       <tr key={w.weekStart} className="hover:bg-ink/2 transition-colors">
                         <td className="px-5 py-2.5">
@@ -404,6 +480,16 @@ export function AthleteDetailTabs({
                 </tbody>
               </table>
             </div>
+            <PaginationFooter
+              className="px-5 py-3 border-t border-ink/6"
+              currentPage={weekCurrentPage}
+              totalPages={weekTotalPages}
+              offset={weekOffset}
+              pageSize={WEEKS_PER_PAGE}
+              totalItems={weekRows.length}
+              unit="tuần"
+              onChange={setWeekPage}
+            />
           </div>
         )}
 
@@ -412,6 +498,7 @@ export function AthleteDetailTabs({
   }
 
   function LogTab({ sessions, phaseExercises }: { sessions: SessionRow[]; phaseExercises: PhaseExercise[] }) {
+    const [logPage, setLogPage] = useState(1)
     const completedSessions = sessions.filter(s => s.sets.length > 0 || s.status === 'completed')
 
     if (completedSessions.length === 0) {
@@ -426,9 +513,14 @@ export function AthleteDetailTabs({
     // Lookup phase-exercise prescription (target sets / rep range) by exercise id
     const targetByExercise = new Map(phaseExercises.map(pe => [pe.exercise_id, pe]))
 
+    const logTotalPages  = Math.max(1, Math.ceil(completedSessions.length / SESSIONS_PER_PAGE))
+    const logCurrentPage = Math.min(logPage, logTotalPages)
+    const logOffset      = (logCurrentPage - 1) * SESSIONS_PER_PAGE
+    const pageSessions   = completedSessions.slice(logOffset, logOffset + SESSIONS_PER_PAGE)
+
     return (
       <div className="space-y-5">
-        {completedSessions.map(session => {
+        {pageSessions.map(session => {
           const statusMeta = SESSION_STATUS_VI[session.status] ?? { label: session.status, cls: '' }
           const hasSurvey = session.survey_performance && session.survey_rir_feel && session.survey_recovery
 
@@ -592,6 +684,16 @@ export function AthleteDetailTabs({
             </div>
           )
         })}
+
+        <PaginationFooter
+          currentPage={logCurrentPage}
+          totalPages={logTotalPages}
+          offset={logOffset}
+          pageSize={SESSIONS_PER_PAGE}
+          totalItems={completedSessions.length}
+          unit="buổi"
+          onChange={setLogPage}
+        />
       </div>
     )
   }
