@@ -7,8 +7,9 @@ import type {
   TrainingBlock, PhaseExercise, UserProgram, WeekType, WorkoutSession,
   SessionSurvey, SurveyPerformance, SurveyRirFeel, SurveyRecovery, WorkoutSet,
 } from '@/types'
-import { buildGuestSuggestion, buildProgressionCue } from '@/lib/autoregulation'
-import type { ProgressionCue } from '@/lib/autoregulation'
+import { buildGuestSuggestion } from '@/lib/autoregulation'
+import { buildPrevWeekRefs } from '@/lib/weekReference'
+import type { WeekSessionRow } from '@/lib/weekReference'
 import { resolveWeekExercises } from '@/lib/phaseWeeks'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
 import { extractSuggestionFromNotes, extractSurveyFromNotes, stripMetaLines, encodeNotesWithMeta } from '@/lib/sessionNotes'
@@ -38,7 +39,6 @@ type ProgramWithJoins = UserProgram & {
 }
 
 type SessionRow = Omit<WorkoutSession, 'sets'> & { sets: { count: number }[] }
-type WeekSessionRow = WorkoutSession & { week: number; sets: WorkoutSet[] }
 
 interface GridCell { setId: string | null; kg: string; reps: string; rir: string }
 type GridState = Record<string, GridCell>
@@ -182,31 +182,6 @@ function readSessionSurvey(s: SessionLike | null | undefined): SessionSurvey | n
 
 function readSessionSuggestion(s: SessionLike | null | undefined): string {
   return s?.next_week_suggestion ?? extractSuggestionFromNotes(s?.notes)
-}
-
-interface ExAverage { avgKg: number | null; avgReps: number; avgRir: number | null; count: number }
-
-/** Average working-set weight & reps for one exercise across a given week. */
-function averageForWeekExercise(
-  weekSessions: WeekSessionRow[],
-  week: number,
-  exerciseId: string,
-): ExAverage | null {
-  const sets = weekSessions
-    .filter(s => s.week === week)
-    .flatMap(s => (s.sets ?? []) as WorkoutSet[])
-    .filter(s => s.exercise_id === exerciseId && !s.is_warmup && s.actual_reps != null)
-  if (sets.length === 0) return null
-  const kgSets = sets.filter(s => s.weight_kg != null)
-  const avgKg = kgSets.length
-    ? Math.round((kgSets.reduce((a, s) => a + (s.weight_kg ?? 0), 0) / kgSets.length) * 4) / 4
-    : null
-  const avgReps = Math.round(sets.reduce((a, s) => a + (s.actual_reps ?? 0), 0) / sets.length)
-  const rirSets = sets.filter(s => s.rir != null)
-  const avgRir = rirSets.length
-    ? Math.round(rirSets.reduce((a, s) => a + (s.rir ?? 0), 0) / rirSets.length)
-    : null
-  return { avgKg, avgReps, avgRir, count: sets.length }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -875,36 +850,14 @@ export function CoachTrainingView({
     : weekExercises
   const sortedRows = sortByOrderLabel(dayExercises)
 
-  // Previous-week reference (mức tạ & reps trung bình) per exercise — shown
+  // Last-logged reference (mức tạ & reps trung bình) per exercise — shown
   // INLINE on each exercise so, in e.g. week 3, you instantly see what you did
   // for that same lift in week 2 without digging back through the week tabs.
-  const prevWeek = activeWeek - 1
-  const prevWeekRef = prevWeek >= 1
-    ? (() => {
-        const labels: Record<string, string> = {}
-        const cues: Record<string, ProgressionCue> = {}
-        for (const pe of sortedRows) {
-          const avg = averageForWeekExercise(weekSessions, prevWeek, pe.exercise_id)
-          if (avg) {
-            labels[pe.exercise_id] =
-              `${avg.avgKg != null ? `${avg.avgKg}kg` : '—'} × ${avg.avgReps} reps`
-            // This week's keep/increase/decrease cue — rep-range logic doesn't
-            // apply to AMRAP or peaking/%1RM weeks, so skip those.
-            if (!pe.is_amrap && !isPeaking) {
-              cues[pe.exercise_id] = buildProgressionCue({
-                avgKg:     avg.avgKg,
-                avgReps:   avg.avgReps,
-                avgRir:    avg.avgRir,
-                repMin:    pe.target_rep_min,
-                repMax:    pe.target_rep_max,
-                rirTarget: pe.rir_target,
-              })
-            }
-          }
-        }
-        return Object.keys(labels).length > 0 ? { week: prevWeek, labels, cues } : undefined
-      })()
-    : undefined
+  //
+  // Skipped weeks are walked back over: if week 2 was missed for this lift, week
+  // 3 falls back to week 1's numbers and the cue becomes a detraining deload
+  // instead of a progression. Week 1 has nothing behind it, so it shows nothing.
+  const prevWeekRefs = buildPrevWeekRefs(sortedRows, weekSessions, activeWeek, isPeaking)
 
   const hasAnyData = Object.values(grid).some(c => c.kg || c.reps) || activeSets.length > 0
   const anySaving  = Object.values(cellSave).some(s => s === 'saving')
@@ -1328,7 +1281,7 @@ export function CoachTrainingView({
           onSaveSession={handleSaveSession}
           saveDisabled={!hasAnyData || !activeSession}
           readOnly={isViewingPastWeek}
-          prevWeekRef={prevWeekRef}
+          prevWeekRefs={prevWeekRefs}
         />
 
         {/* ══════════════════════════════════════════════════════════════════════

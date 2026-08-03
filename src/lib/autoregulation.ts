@@ -295,16 +295,26 @@ export function computeIntraSessionGuidance(input: {
  *   • otherwise (inside range, or top-but-too-hard) → giữ tạ, cố thêm reps
  *
  * Not meaningful for AMRAP or peaking/%1RM weeks — callers should skip those.
+ *
+ * When the reference is NOT last week (the athlete skipped one or more weeks on
+ * that lift), rep-range progression no longer applies: the missed weeks cost
+ * strength, so the cue becomes a detraining deload off the last known load.
  */
 export type ProgressionAction = 'increase' | 'hold' | 'decrease'
 
 export interface ProgressionCue {
   action: ProgressionAction
-  /** Suggested load for this week (null when last week had no weight logged). */
+  /** Suggested load for this week (null when the reference had no weight logged). */
   suggestedWeightKg: number | null
   /** Short Vietnamese action line for display. */
   message: string
+  /** Weeks skipped between the reference week and this one (0 = last week). */
+  missedWeeks: number
 }
+
+/** Detraining deload off the last known load: −5% per missed week, capped at −20%. */
+const DETRAIN_PCT_PER_WEEK = 0.05
+const DETRAIN_PCT_MAX      = 0.20
 
 export function buildProgressionCue(input: {
   avgKg:     number | null
@@ -313,9 +323,38 @@ export function buildProgressionCue(input: {
   repMin:    number
   repMax:    number
   rirTarget: number
+  /**
+   * Weeks skipped between the reference week and the week being logged.
+   * 0 = the reference is last week (normal progression). ≥1 = layoff on this
+   * lift → deload instead of progressing.
+   */
+  missedWeeks?: number
 }): ProgressionCue {
   const { avgKg, avgReps, avgRir, repMin, repMax, rirTarget } = input
+  const missedWeeks = Math.max(0, input.missedWeeks ?? 0)
   const hasKg = avgKg != null && avgKg > 0
+
+  // ── Reference is older than last week → detraining deload ─────────────────
+  if (missedWeeks >= 1) {
+    const pct = Math.min(DETRAIN_PCT_PER_WEEK * missedWeeks, DETRAIN_PCT_MAX)
+    let suggested: number | null = null
+    if (hasKg) {
+      suggested = roundToHalfKg(avgKg! * (1 - pct))
+      if (suggested >= avgKg!) suggested = roundToHalfKg(avgKg! - 0.5)
+      if (suggested <= 0) suggested = null
+    }
+    const gap = `Nghỉ ${missedWeeks} tuần bài này`
+    return {
+      action: 'decrease',
+      suggestedWeightKg: suggested,
+      missedWeeks,
+      message: suggested != null
+        ? `${gap} — tuần này giảm ~${Math.round(pct * 100)}% về ~${fmtKg(suggested)} kg, ` +
+          `tập lại đủ dải ${repMin}–${repMax} reps rồi mới tăng dần về mức cũ.`
+        : `${gap} — tuần này giảm ~${Math.round(pct * 100)}% so với mức cũ, ` +
+          `tập lại đủ dải ${repMin}–${repMax} reps rồi mới tăng dần về mức cũ.`,
+    }
+  }
 
   // ── Below range → too heavy last week → reduce ────────────────────────────
   if (avgReps < repMin) {
@@ -329,6 +368,7 @@ export function buildProgressionCue(input: {
     return {
       action: 'decrease',
       suggestedWeightKg: suggested,
+      missedWeeks,
       message: suggested != null
         ? `Tuần này giảm về ~${fmtKg(suggested)} kg để vào lại dải ${repMin}–${repMax} reps.`
         : `Tuần này giảm nhẹ tạ để vào lại dải ${repMin}–${repMax} reps.`,
@@ -348,6 +388,7 @@ export function buildProgressionCue(input: {
     return {
       action: 'increase',
       suggestedWeightKg: suggested,
+      missedWeeks,
       message: suggested != null
         ? `Tuần này tăng lên ~${fmtKg(suggested)} kg (đã đạt đỉnh dải rep).`
         : `Tuần này tăng tạ nhẹ — đã đạt đỉnh dải rep.`,
@@ -358,6 +399,7 @@ export function buildProgressionCue(input: {
   return {
     action: 'hold',
     suggestedWeightKg: hasKg ? avgKg! : null,
+    missedWeeks,
     message: hasKg
       ? `Tuần này giữ ${fmtKg(avgKg!)} kg, cố thêm 1–2 reps mỗi hiệp trước khi tăng.`
       : `Tuần này giữ nguyên tạ, cố thêm 1–2 reps mỗi hiệp trước khi tăng.`,

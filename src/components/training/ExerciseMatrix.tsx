@@ -4,6 +4,7 @@ import { useState, useEffect, Fragment } from 'react'
 import { cn } from '@/lib/utils'
 import { computeIntraSessionGuidance, firstSetTargetHint } from '@/lib/autoregulation'
 import type { ProgressionCue } from '@/lib/autoregulation'
+import type { PrevWeekRef } from '@/lib/weekReference'
 import { TechniqueButton } from './TechniqueButton'
 import type { PhaseExercise } from '@/types'
 
@@ -47,13 +48,11 @@ interface ExerciseMatrixProps {
   /** Read-only history view (past weeks): inputs are locked, save is hidden. */
   readOnly?:           boolean
   /**
-   * Previous-week reference shown inline on each exercise: e.g. in week 3 it
+   * Last-logged reference shown inline on each exercise: e.g. in week 3 it
    * reminds you that in week 2 you did "12.5 kg × 10 lần" for that same lift.
-   * `labels` is keyed by exercise_id; only exercises with logged data appear.
-   * `cues` (optional, same keying) carries this week's keep/increase/decrease
-   * recommendation derived from that reference.
+   * Keyed by exercise_id; only exercises with logged data appear.
    */
-  prevWeekRef?:        { week: number; labels: Record<string, string>; cues?: Record<string, ProgressionCue> }
+  prevWeekRefs?:       Record<string, PrevWeekRef>
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -130,7 +129,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
     onNoteChange, onCellChange, onCellBlur,
     overloadSuggestions, isOverloadWeek, isPeaking, scopeKey, legendLabel,
     sessionCompleted, sessionCreating, anySaving, anyError,
-    onSaveSession, saveDisabled, readOnly = false, prevWeekRef,
+    onSaveSession, saveDisabled, readOnly = false, prevWeekRefs,
   } = props
 
   // ── Mobile focus index + per-exercise extra-set reveal ────────────────────
@@ -276,22 +275,24 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
                       {pe.notes && (
                         <p className="mt-1.5 text-[10px] text-ink/55 leading-snug whitespace-pre-line">📝 {pe.notes}</p>
                       )}
-                      {prevWeekRef?.labels[exerciseId] && (
-                        <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber/8 border border-amber/20 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-amber leading-none">
-                          📊 Tuần {prevWeekRef.week} đã tập {prevWeekRef.labels[exerciseId]}
-                        </p>
-                      )}
-                      {prevWeekRef?.cues?.[exerciseId] && (() => {
-                        const cue = prevWeekRef.cues[exerciseId]
-                        const cs  = cueStyle(cue)
+                      {prevWeekRefs?.[exerciseId] && (() => {
+                        const ref = prevWeekRefs[exerciseId]
+                        const cs  = ref.cue ? cueStyle(ref.cue) : null
                         return (
-                          <p className={cn(
-                            'mt-1 flex items-start gap-1 rounded-md border px-1.5 py-1 text-[10px] font-semibold leading-snug',
-                            cs.chip, cs.text,
-                          )}>
-                            <span className="shrink-0 leading-none">{cs.icon}</span>
-                            <span>{cue.message}</span>
-                          </p>
+                          <>
+                            <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-amber/8 border border-amber/20 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-amber leading-none">
+                              📊 Tuần {ref.week} {ref.missedWeeks > 0 ? 'từng tập' : 'đã tập'} {ref.label}
+                            </p>
+                            {ref.cue && cs && (
+                              <p className={cn(
+                                'mt-1 flex items-start gap-1 rounded-md border px-1.5 py-1 text-[10px] font-semibold leading-snug',
+                                cs.chip, cs.text,
+                              )}>
+                                <span className="shrink-0 leading-none">{cs.icon}</span>
+                                <span>{ref.cue.message}</span>
+                              </p>
+                            )}
+                          </>
                         )
                       })()}
                     </td>
@@ -427,7 +428,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
           onSaveSession={onSaveSession}
           saveDisabled={saveDisabled}
           readOnly={readOnly}
-          prevWeekRef={prevWeekRef}
+          prevWeekRefs={prevWeekRefs}
         />
       </div>
     </>
@@ -457,7 +458,7 @@ interface MobileFocusProps {
   onSaveSession:       () => void
   saveDisabled:        boolean
   readOnly:            boolean
-  prevWeekRef?:        { week: number; labels: Record<string, string>; cues?: Record<string, ProgressionCue> }
+  prevWeekRefs?:       Record<string, PrevWeekRef>
 }
 
 function MobileFocus(p: MobileFocusProps) {
@@ -526,28 +527,31 @@ function MobileFocus(p: MobileFocusProps) {
           </div>
         )}
 
-        {/* previous-week reference — "tuần trước bài này bạn tập …" */}
-        {p.prevWeekRef?.labels[exerciseId] && (
-          <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-base shrink-0">📊</span>
-              <p className="text-sm text-ink/75">
-                <span className="font-semibold text-amber">Tuần {p.prevWeekRef.week} đã tập</span>{' '}
-                <span className="font-mono font-semibold">{p.prevWeekRef.labels[exerciseId]}</span>
-              </p>
-            </div>
-            {p.prevWeekRef.cues?.[exerciseId] && (() => {
-              const cue = p.prevWeekRef!.cues![exerciseId]
-              const cs  = cueStyle(cue)
-              return (
+        {/* last-logged reference — "tuần trước bài này bạn tập …" (or further
+            back, with a deload cue, when weeks on this lift were skipped) */}
+        {p.prevWeekRefs?.[exerciseId] && (() => {
+          const ref = p.prevWeekRefs![exerciseId]
+          const cs  = ref.cue ? cueStyle(ref.cue) : null
+          return (
+            <div className="rounded-xl border border-amber/25 bg-amber/5 px-3.5 py-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base shrink-0">📊</span>
+                <p className="text-sm text-ink/75">
+                  <span className="font-semibold text-amber">
+                    Tuần {ref.week} {ref.missedWeeks > 0 ? 'từng tập' : 'đã tập'}
+                  </span>{' '}
+                  <span className="font-mono font-semibold">{ref.label}</span>
+                </p>
+              </div>
+              {ref.cue && cs && (
                 <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2', cs.chip)}>
                   <span className="text-base leading-none shrink-0">{cs.icon}</span>
-                  <p className={cn('text-sm font-semibold leading-snug', cs.text)}>{cue.message}</p>
+                  <p className={cn('text-sm font-semibold leading-snug', cs.text)}>{ref.cue.message}</p>
                 </div>
-              )
-            })()}
-          </div>
-        )}
+              )}
+            </div>
+          )
+        })()}
 
         {/* column labels */}
         <div className="flex items-center gap-2.5 px-1">
