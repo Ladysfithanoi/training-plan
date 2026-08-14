@@ -198,6 +198,14 @@ export default async function CoachMyTrainingPage({
 
   const phaseWeekType: WeekType = (userProgram?.current_phase?.week_type) ?? 'standard'
 
+  // ── Is the active meso the LAST one of its block? ─────────────────────────
+  // blockPhases is ordered by phase_order, so the last entry is the final meso.
+  // Drives the "hoàn thành giáo án" celebration once its final week is logged.
+  const isFinalPhase =
+    blockPhases.length > 0 &&
+    !!userProgram?.current_phase_id &&
+    blockPhases[blockPhases.length - 1].id === userProgram.current_phase_id
+
   return (
     <div className="space-y-6">
       <div>
@@ -223,6 +231,7 @@ export default async function CoachMyTrainingPage({
         phaseWeekType={phaseWeekType}
         todayCompletedSession={forceSelector ? null : todayCompletedSession}
         programCompleted={programCompleted}
+        isFinalPhase={isFinalPhase}
       />
     </div>
   )

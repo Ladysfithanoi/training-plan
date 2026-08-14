@@ -13,7 +13,9 @@ import type { WeekSessionRow } from '@/lib/weekReference'
 import { resolveWeekExercises } from '@/lib/phaseWeeks'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
 import { extractSuggestionFromNotes, extractSurveyFromNotes } from '@/lib/sessionNotes'
+import { collectLoggedExerciseIds, isFinalSessionOfProgram } from '@/lib/programCompletion'
 import { ExerciseMatrix } from '@/components/training/ExerciseMatrix'
+import { ProgramCompleteBanner, ProgramCompleteModal } from '@/components/training/ProgramCompleteCelebration'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,9 @@ interface GuestTrainingViewProps {
   todayCompletedSession: (WorkoutSession & { sets: WorkoutSet[] }) | null
   /** True when the last meso just expired and the whole program is now completed. */
   programCompleted?:     boolean
+  /** True when the active meso is the LAST one of its block — enables the
+   *  "hoàn thành giáo án" celebration once its final week is fully logged. */
+  isFinalPhase?:         boolean
 }
 
 // ─── Survey options ───────────────────────────────────────────────────────────
@@ -143,6 +148,7 @@ export function GuestTrainingView({
   phaseWeekType,
   todayCompletedSession,
   programCompleted = false,
+  isFinalPhase = false,
 }: GuestTrainingViewProps) {
   const router = useRouter()
 
@@ -282,6 +288,11 @@ export function GuestTrainingView({
     if (!_todayHasSetsForInitialDay) return null
     return readSessionSurvey(todayCompletedSession) ? weekInPhase + 1 : null
   })
+
+  // ── Program-completion celebration ─────────────────────────────────────────
+  // Opens automatically the moment the final buổi tập of the final week of the
+  // final meso is confirmed; re-openable afterwards from the persistent banner.
+  const [showProgramDone, setShowProgramDone] = useState(false)
 
   // ── History ────────────────────────────────────────────────────────────────
   const [historyPage, setHistoryPage] = useState(1)
@@ -603,6 +614,24 @@ export function GuestTrainingView({
     setShowEvalModal(false)
     setShowSummary(true)
     setSessionCompleted(true)
+
+    // ── Did this finish the whole block? ─────────────────────────────────────
+    // weekSessions is the server snapshot from BEFORE this save, so the sets
+    // just logged are folded in from the live grid (keys are "exerciseId:setNum").
+    const loggedIds = collectLoggedExerciseIds(weekSessions, activeWeek)
+    for (const key of Object.keys(gridRef.current)) loggedIds.add(key.split(':')[0])
+    if (isFinalSessionOfProgram({
+      isFinalPhase,
+      activeWeek,
+      durationWeeks,
+      weekExercises: resolveWeekExercises(phaseExercises, activeWeek),
+      splitDays: phaseSplitDays,
+      activeDayId,
+      loggedExerciseIds: loggedIds,
+    })) {
+      setShowProgramDone(true)
+    }
+
     router.refresh()
   }
 
@@ -631,6 +660,19 @@ export function GuestTrainingView({
   // 3 falls back to week 1's numbers and the cue becomes a detraining deload
   // instead of a progression. Week 1 has nothing behind it, so it shows nothing.
   const prevWeekRefs = buildPrevWeekRefs(sortedRows, weekSessions, activeWeek, isPeaking)
+
+  // True once every training day of the FINAL week of the FINAL meso carries
+  // logged sets. Derived from the server snapshot (not from what's on screen),
+  // so the banner survives a reload and shows on any week tab.
+  const programFinished = isFinalSessionOfProgram({
+    isFinalPhase,
+    activeWeek:        durationWeeks,
+    durationWeeks,
+    weekExercises:     resolveWeekExercises(phaseExercises, durationWeeks),
+    splitDays:         phaseSplitDays,
+    activeDayId:       null,
+    loggedExerciseIds: collectLoggedExerciseIds(weekSessions, durationWeeks),
+  })
 
   const hasAnyData = Object.values(grid).some(c => c.kg || c.reps) || activeSets.length > 0
   const anySaving  = Object.values(cellSave).some(s => s === 'saving')
@@ -741,7 +783,27 @@ export function GuestTrainingView({
         </div>
       )}
 
+      {/* ══════════════════════════════════════════════════════════════════════
+          PROGRAM COMPLETE  —  final session of the final week of the final meso
+      ══════════════════════════════════════════════════════════════════════ */}
+      <ProgramCompleteModal
+        open={showProgramDone}
+        onClose={() => setShowProgramDone(false)}
+        blockName={userProgram.block?.name ?? 'khối tập luyện này'}
+        phaseName={userProgram.current_phase?.name ?? null}
+        cta={{
+          hint: 'Hãy liên hệ huấn luyện viên để nhận giáo án cho chặng tiếp theo — đừng tự lặp lại meso cuối quá 1–2 tuần.',
+        }}
+      />
+
       <div className="space-y-5">
+
+        {programFinished && (
+          <ProgramCompleteBanner
+            blockName={userProgram.block?.name ?? 'khối tập luyện này'}
+            onOpen={() => setShowProgramDone(true)}
+          />
+        )}
 
         {/* ── Athlete header ───────────────────────────────────────────────── */}
         <div className="text-center py-1">

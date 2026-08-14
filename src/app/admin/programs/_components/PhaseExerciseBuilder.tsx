@@ -8,6 +8,8 @@ import { Card, CardBody } from '@/components/ui/Card'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { TechniqueButton } from '@/components/training/TechniqueButton'
+import { ImportScheduleExcelModal } from './ImportScheduleExcelModal'
+import type { ImportResult } from './ImportScheduleExcelModal'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import {
   recommendSplit,
@@ -266,7 +268,15 @@ function splitSig(type: SplitType | null, days: SplitDay[]): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBlockId, onBlocksChange }: Props) {
+export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns, selectedBlockId, onBlocksChange }: Props) {
+
+  // ── Local exercise-library mirror ────────────────────────────────────────────
+  // The Excel import can create brand-new Kho bài tập entries mid-session. They
+  // must appear in the pickers immediately, without a full page reload — so the
+  // server prop is mirrored here and appended to on import.
+  const [exercises, setExercises] = useState<Exercise[]>(libraryProp)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setExercises(libraryProp) }, [libraryProp])
 
   // ── Local block mirror ───────────────────────────────────────────────────────
   // Keeps a mutable copy so phase CRUD (add / rename / delete meso) is reflected
@@ -358,6 +368,11 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
   // Save states
   const [saveStatus, setSaveStatus]   = useState<SaveStatus>('idle') // explicit button
   const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null) // server reason on failure
+
+  // ── Excel import (whole day at once) ─────────────────────────────────────────
+  const [importOpen, setImportOpen]       = useState(false)
+  /** Short-lived banner summarising the last import. */
+  const [importSummary, setImportSummary] = useState<ImportResult | null>(null)
 
   // ── Add exercise form ────────────────────────────────────────────────────────
   const [addOpen, setAddOpen]             = useState(false)
@@ -693,6 +708,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setSaveStatus('idle')
     setEditingOLId(null)
     setSelectedWeek(null)
+    setImportOpen(false)
+    setImportSummary(null)
   }, [selectedBlockId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Phase change ─────────────────────────────────────────────────────────────
@@ -736,6 +753,8 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setAddingDay(false)
     setSaveStatus('idle')
     setEditingOLId(null)
+    setImportOpen(false)
+    setImportSummary(null)
     // Per-week (migration 011): start each phase on the base ("Gốc") scope.
     setSelectedWeek(null)
     // Reset orphan-recovery & copy-day selections for the new phase context.
@@ -1621,6 +1640,31 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
     setCopyingDay(false)
   }
 
+  // ── Excel import — fill the active day from a spreadsheet in one go ───────────
+  // The endpoint has already created any missing Kho bài tập entries and returned
+  // the new phase_exercise rows with their exercise joined, so both the table and
+  // the exercise pickers can be updated without a round-trip.
+  function handleImported(result: ImportResult) {
+    setPhaseExercises(prev => [...prev, ...result.phaseExercises])
+
+    // Fold newly-created library entries into the local mirror so they show up in
+    // the "Thêm bài tập" / "Sửa bài tập" pickers straight away.
+    setExercises(prev => {
+      const known  = new Set(prev.map(e => e.id))
+      const fresh: Exercise[] = []
+      for (const pe of result.phaseExercises) {
+        const ex = pe.exercise
+        if (!ex || known.has(ex.id)) continue
+        known.add(ex.id)
+        fresh.push(ex)
+      }
+      if (fresh.length === 0) return prev
+      return [...prev, ...fresh].sort((a, b) => a.name.localeCompare(b.name))
+    })
+
+    setImportSummary(result)
+  }
+
   // ── Copy whole sessions (buổi) from another Meso into THIS meso ────────────────
   // For each selected source day we CREATE a new day in the current split (draft,
   // persisted when the coach saves the config) and clone all of that day's
@@ -2448,6 +2492,17 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               )}
               <Button
                 size="sm"
+                variant="secondary"
+                onClick={() => { setImportSummary(null); setImportOpen(true) }}
+                disabled={viewingUncustomizedWeek || !selectedPhaseId}
+                title={viewingUncustomizedWeek
+                  ? 'Hãy “Tùy chỉnh tuần này” trước'
+                  : 'Nhập cả buổi tập từ file Excel'}
+              >
+                ⬆ Nhập Excel
+              </Button>
+              <Button
+                size="sm"
                 onClick={() => setAddOpen(v => !v)}
                 disabled={viewingUncustomizedWeek}
                 title={viewingUncustomizedWeek ? 'Hãy “Tùy chỉnh tuần này” trước' : undefined}
@@ -2456,6 +2511,36 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
               </Button>
             </div>
           </div>
+
+          {/* Result of the last Excel import — highlights any name that was newly
+              added to Kho bài tập, since those still need their details filled in. */}
+          {importSummary && (
+            <div className="rounded-xl border border-herb/25 bg-herb/6 px-4 py-3 flex items-start gap-3">
+              <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-xs font-semibold text-herb">
+                  Đã nhập {importSummary.added} bài tập từ Excel
+                  {activeDay ? ` vào “${activeDay.label}”` : ''}
+                </p>
+                {importSummary.createdExercises.length > 0 && (
+                  <p className="text-[11px] text-ink/60 leading-relaxed">
+                    {importSummary.createdExercises.length} bài tập mới đã được thêm vào Kho bài tập
+                    ({importSummary.createdExercises.map(e => e.name).join(', ')}) — mới chỉ có tên,
+                    hãy vào <span className="font-semibold">Thư viện</span> để điền loại bài, chuỗi
+                    chuyển động và nhóm cơ.
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setImportSummary(null)}
+                aria-label="Đóng thông báo"
+                className="shrink-0 h-6 w-6 flex items-center justify-center rounded text-ink/30 hover:text-ink hover:bg-ink/6 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Preview hint — assignments are pinned, so saved-config exercises are
               hidden (not lost) while another layout is being previewed. */}
@@ -3432,6 +3517,20 @@ export function PhaseExerciseBuilder({ blocks, exercises, patterns, selectedBloc
           </div>
         </div>
       </Modal>
+
+      {/* ── Nhập bài tập của một buổi từ Excel ───────────────────────────── */}
+      {selectedPhaseId && (
+        <ImportScheduleExcelModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          exercises={exercises}
+          phaseId={selectedPhaseId}
+          dayId={splitType ? activeDayId : null}
+          dayLabel={splitType ? (activeDay?.label ?? null) : null}
+          weekNumber={selectedWeek}
+          onImported={handleImported}
+        />
+      )}
 
       {/* ── Edit exercise modal ──────────────────────────────────────────── */}
       <Modal

@@ -179,6 +179,20 @@ export default async function GuestProgramPage({
     ? (userProgram!.current_phase!.split_days as Array<{ id: string; type: string; label: string }>)
     : []
 
+  // ── Is the active meso the LAST one of its block? ─────────────────────────
+  // Drives the "hoàn thành giáo án" celebration once its final week is logged.
+  let isFinalPhase = false
+  if (userProgram?.block_id && userProgram.current_phase_id) {
+    const { data: lastPhase } = await admin
+      .from('phases')
+      .select('id')
+      .eq('block_id', userProgram.block_id)
+      .order('phase_order', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    isFinalPhase = lastPhase?.id === userProgram.current_phase_id
+  }
+
   return (
     <GuestTrainingView
       token={token}
@@ -193,6 +207,7 @@ export default async function GuestProgramPage({
       phaseWeekType={phaseWeekType}
       todayCompletedSession={todayCompletedSession}
       programCompleted={programCompleted}
+      isFinalPhase={isFinalPhase}
     />
   )
 }
