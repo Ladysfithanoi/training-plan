@@ -77,6 +77,8 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
   const [createOpen, setCreateOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Exercise | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  /** Set when an import actually wrote rows — triggers a refresh on modal close. */
+  const [needsRefreshAfterImport, setNeedsRefreshAfterImport] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -189,8 +191,19 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
     setDeleteTarget(null)
   }
 
-  function handleImported(_count: number) {
-    window.location.reload()
+  /**
+   * Reloading here would wipe the modal's summary screen (how many were added,
+   * which names were skipped) before it could be read — the import finishes and
+   * the page navigates in the same tick. Remember that a write happened instead,
+   * and refresh once the coach dismisses the modal.
+   */
+  function handleImported(count: number) {
+    if (count > 0) setNeedsRefreshAfterImport(true)
+  }
+
+  function closeImportModal() {
+    setImportOpen(false)
+    if (needsRefreshAfterImport) window.location.reload()
   }
 
   // Lọc
@@ -444,7 +457,7 @@ export function ExercisesTab({ exercises: initialExercises, patterns, onExercise
 
       <ImportExcelModal
         open={importOpen}
-        onClose={() => setImportOpen(false)}
+        onClose={closeImportModal}
         patterns={patterns}
         onImported={handleImported}
       />

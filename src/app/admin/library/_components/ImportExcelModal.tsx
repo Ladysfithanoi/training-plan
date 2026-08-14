@@ -39,6 +39,8 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const [importDone, setImportDone] = useState<number | null>(null)
+  /** Names already in the library — reported so nothing looks silently dropped. */
+  const [skippedNames, setSkippedNames] = useState<string[]>([])
 
   function resolveColumn(headers: string[], candidates: string[]): number {
     for (const c of candidates) {
@@ -156,6 +158,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
     }
 
     setImportDone(data.imported)
+    setSkippedNames(data.skipped_names ?? [])
     onImported(data.imported)
   }
 
@@ -165,6 +168,7 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
     setParseError(null)
     setImportDone(null)
     setImportError(null)
+    setSkippedNames([])
     onClose()
   }
 
@@ -178,7 +182,18 @@ export function ImportExcelModal({ open, onClose, patterns, onImported }: Props)
             </svg>
           </div>
           <p className="text-lg font-bold text-ink">Nhập thành công</p>
-          <p className="text-sm text-ink/50">{importDone} bài tập đã được nhập.</p>
+          <p className="text-sm text-ink/50">{importDone} bài tập mới đã được thêm vào Kho bài tập.</p>
+          {skippedNames.length > 0 && (
+            <div className="mx-auto max-w-md rounded-xl border border-ink/10 bg-ink/3 px-4 py-3 text-left">
+              <p className="text-xs font-semibold text-ink/70 mb-1">
+                {skippedNames.length} bài tập đã có sẵn nên được giữ nguyên
+              </p>
+              <p className="text-xs text-ink/50 leading-relaxed">{skippedNames.join(', ')}</p>
+              <p className="text-[11px] text-ink/35 mt-2">
+                Thông tin đã điền tay của các bài này không bị file Excel ghi đè.
+              </p>
+            </div>
+          )}
           <Button variant="primary" onClick={handleClose}>Hoàn tất</Button>
         </div>
       ) : (
