@@ -18,6 +18,14 @@
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import {
+  COLUMN_ALIASES,
+  cellText,
+  normalizeHeader,
+  parseBool,
+  resolveColumn,
+  splitRepRange,
+} from '@/lib/excelImport'
 import type { Exercise, PhaseExercise } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,65 +61,8 @@ interface Props {
   onImported: (result: ImportResult) => void
 }
 
-// ─── Column resolution ────────────────────────────────────────────────────────
-
-/** Strip accents + collapse whitespace so "Tên bài tập" ≈ "ten bai tap". */
-function normalizeHeader(raw: unknown): string {
-  return String(raw ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[đĐ]/g, 'd')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-const COLUMN_ALIASES = {
-  name:     ['ten bai tap', 'bai tap', 'ten', 'name', 'exercise', 'exercise name'],
-  sets:     ['so hiep', 'hiep', 'set', 'sets', 'so set'],
-  reps:     ['reps', 'rep', 'so rep', 'vung rep', 'reps muc tieu'],
-  repMin:   ['rep min', 'reps min', 'rep toi thieu', 'min reps', 'rep tu'],
-  repMax:   ['rep max', 'reps max', 'rep toi da', 'max reps', 'rep den'],
-  rir:      ['rir', 'rir muc tieu', 'rir target'],
-  order:    ['stt', 'thu tu', 'order', 'order label', 'ma stt'],
-  warmup:   ['khoi dong', 'bai khoi dong', 'warmup', 'warm up'],
-  notes:    ['ghi chu', 'notes', 'note', 'luu y'],
-} as const
-
-function resolveColumn(headers: string[], aliases: readonly string[]): number {
-  for (const alias of aliases) {
-    const idx = headers.indexOf(alias)
-    if (idx !== -1) return idx
-  }
-  return -1
-}
-
-/** "8-12", "8 – 12", "8 to 12" → { min: '8', max: '12' }; "10" → both 10. */
-function splitRepRange(raw: unknown): { min: string; max: string } | null {
-  const text = String(raw ?? '').trim()
-  if (!text) return null
-  const parts = text.split(/[-–—~]|\bto\b|\bđến\b/i).map(p => p.trim()).filter(Boolean)
-  if (parts.length >= 2) {
-    const a = parseInt(parts[0], 10)
-    const b = parseInt(parts[1], 10)
-    if (Number.isFinite(a) && Number.isFinite(b)) return { min: String(a), max: String(b) }
-  }
-  const single = parseInt(text, 10)
-  if (Number.isFinite(single)) return { min: String(single), max: String(single) }
-  return null
-}
-
-const TRUTHY = ['x', 'v', 'co', 'yes', 'y', 'true', '1', 'warmup', 'khoi dong']
-
-function parseBool(raw: unknown): boolean {
-  return TRUTHY.includes(normalizeHeader(raw))
-}
-
-/** Cells come back as numbers or strings depending on the sheet — normalise. */
-function cellText(raw: unknown): string {
-  if (raw == null) return ''
-  return String(raw).trim()
-}
+// Column resolution + cell coercion live in @/lib/excelImport — shared with the
+// whole-program (multi-sheet) importer so both accept identical spreadsheets.
 
 // ─── Template ─────────────────────────────────────────────────────────────────
 
