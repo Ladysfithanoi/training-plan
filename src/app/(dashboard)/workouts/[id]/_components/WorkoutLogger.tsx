@@ -1,17 +1,13 @@
 'use client'
 
-import { useState, useRef, Fragment } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDate, cn } from '@/lib/utils'
 import { HelpTip } from '@/components/ui/HelpTip'
 import { GLOSSARY } from '@/lib/glossary'
-import {
-  buildNextWeekSuggestion,
-  firstSetTargetHint,
-  computeIntraSessionGuidance,
-} from '@/lib/autoregulation'
+import { buildNextWeekSuggestion } from '@/lib/autoregulation'
 import { computeSessionVolume, computeSessionWorkingSets } from '@/lib/volumeLoad'
-import { TechniqueButton } from '@/components/training/TechniqueButton'
+import { ExerciseMatrix, type ActiveSetLite } from '@/components/training/ExerciseMatrix'
 import type {
   WorkoutSession,
   WorkoutSet,
@@ -23,10 +19,6 @@ import type {
   SurveyRirFeel,
   SurveyRecovery,
 } from '@/types'
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const MAX_SETS = 6
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -332,6 +324,17 @@ export function WorkoutLogger({
     : phaseExercises
   const sortedRows   = sortByOrderLabel(dayExercises)
 
+  // Các hiệp đã lưu của buổi tập — ma trận dùng để đổ lại số liệu cho những ô
+  // chưa có trong `grid` (grid đã nạp sẵn từ session.sets nên đây là dự phòng).
+  const activeSets: ActiveSetLite[] = ((session.sets ?? []) as WorkoutSet[]).map(s => ({
+    id:          s.id,
+    exercise_id: s.exercise_id,
+    set_number:  s.set_number,
+    weight_kg:   s.weight_kg,
+    actual_reps: s.actual_reps,
+    rir:         s.rir,
+  }))
+
   const hasAnyData   = Object.values(grid).some(c => c.kg || c.reps)
   const anySaving    = Object.values(cellSave).some(s => s === 'saving')
   const anyError     = Object.values(cellSave).some(s => s === 'error')
@@ -608,7 +611,12 @@ export function WorkoutLogger({
         </div>
       )}
 
-      {/* ── Spreadsheet matrix ── */}
+      {/* ══════════════════════════════════════════════════════════════════════
+          MA TRẬN BÀI TẬP — dùng chung với Lịch tập của HLV và trang giáo án
+          chia sẻ qua liên kết. Máy tính: bảng đầy đủ. Điện thoại: chế độ tập
+          trung từng bài, có nút "Xem kỹ thuật" và "Bài trước / Bài tiếp theo"
+          (bảng ngang 1080px trước đây không bấm được hai thứ này trên iPhone).
+      ══════════════════════════════════════════════════════════════════════ */}
       {sortedRows.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-ink/12 bg-white px-6 py-12 text-center space-y-3">
           <p className="text-4xl opacity-20">📋</p>
@@ -619,354 +627,31 @@ export function WorkoutLogger({
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-ink/10 bg-white overflow-hidden shadow-sm">
-          {/* Legend */}
-          <div className="px-4 py-2 border-b border-ink/6 flex items-center gap-3">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-ink/35 flex items-center gap-1">
-              {sortedRows.length} bài tập
-            </span>
-            <span className="inline-flex items-center gap-1 text-[10px] text-amber/70">
-              Nhập RIR mỗi hiệp để tự điều chỉnh tải
-              <HelpTip text={GLOSSARY.intraSessionLoad.def} />
-            </span>
-            <span className="ml-auto flex items-center gap-2 text-[10px] text-ink/30">
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded border border-amber/40 bg-amber/10" />
-                Đang nhập
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded border border-herb bg-herb-wash" />
-                Đã đạt
-              </span>
-              <span className="hidden sm:inline text-ink/20">← vuốt ngang để xem thêm hiệp →</span>
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table
-              className="border-separate border-spacing-0"
-              style={{ minWidth: '1080px', width: '100%' }}
-            >
-              <thead>
-                <tr>
-                  {/* STT */}
-                  <th className="sticky left-0 z-20 border-b border-r border-ink/8 bg-paper px-2.5 py-2.5 text-left"
-                      style={{ width: 44 }}>
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30">STT</span>
-                  </th>
-                  {/* Bài tập */}
-                  <th className="sticky z-20 border-b border-r border-ink/8 bg-paper px-3 py-2.5 text-left"
-                      style={{ left: 44, minWidth: 148 }}>
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30">Bài tập</span>
-                  </th>
-                  {/* Mục tiêu */}
-                  <th className="border-b border-r border-ink/8 bg-paper/80 px-3 py-2.5 text-left"
-                      style={{ width: 96 }}>
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30">Mục tiêu</span>
-                  </th>
-                  {/* Hiệp 1…6 */}
-                  {Array.from({ length: MAX_SETS }, (_, i) => (
-                    <th key={i}
-                        className="border-b border-r border-ink/8 bg-paper/80 px-2 py-2 text-center"
-                        style={{ width: 134 }}>
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30 block">
-                        Hiệp {i + 1}
-                      </span>
-                      <div className="flex justify-center gap-1.5 mt-0.5">
-                        <span className="w-[40px] text-[8px] text-ink/40 font-mono font-semibold">Kg</span>
-                        <span className="w-[40px] text-[8px] text-ink/40 font-mono font-semibold">Lần</span>
-                        <span className="w-[32px] text-[8px] text-amber/70 font-mono font-semibold">RIR</span>
-                      </div>
-                    </th>
-                  ))}
-                  {/* Ghi chú */}
-                  <th className="border-b border-ink/8 bg-paper/80 px-3 py-2.5 text-left"
-                      style={{ minWidth: 104 }}>
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30">Ghi chú</span>
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {sortedRows.map((pe, rowIdx) => {
-                  const exerciseId  = pe.exercise_id
-                  const exName      = pe.exercise?.name ?? 'Bài tập'
-                  const exType      = pe.exercise?.type ?? ''
-                  const targetSets  = pe.target_sets ?? 3
-                  const targetLabel = pe.is_amrap
-                    ? `${targetSets}× ${pe.target_rep_min}–${pe.target_rep_max}+A`
-                    : `${targetSets} × ${pe.target_rep_min}–${pe.target_rep_max}`
-
-                  const rowTint  = rowIdx % 2 === 1
-                  const stickyBg = rowTint ? 'bg-[#F0EBE1]' : 'bg-paper'
-
-                  // ── Intra-session load guidance (Eric Helms) ───────────────
-                  // Reacts to the first working set vs the prescription. Skipped
-                  // for AMRAP (different intent) and peaking/%1RM weeks where the
-                  // rep-range rule doesn't apply.
-                  const s1 = grid[`${exerciseId}:1`]
-                  const guidance =
-                    !pe.is_amrap && !isPeaking && s1?.reps
-                      ? computeIntraSessionGuidance({
-                          firstSetReps:     parseInt(s1.reps, 10),
-                          firstSetWeightKg: s1.kg  ? parseFloat(s1.kg)   : null,
-                          firstSetRir:      s1.rir ? parseInt(s1.rir, 10) : null,
-                          repMin:           pe.target_rep_min,
-                          repMax:           pe.target_rep_max,
-                          rirTarget:        pe.rir_target,
-                        })
-                      : null
-                  const targetTip =
-                    !pe.is_amrap && !isPeaking
-                      ? firstSetTargetHint(pe.target_rep_min, pe.target_rep_max, pe.rir_target)
-                      : undefined
-
-                  return (
-                    <Fragment key={pe.id}>
-                    <tr>
-                      {/* STT */}
-                      <td className={cn('sticky left-0 z-10 border-b border-r border-ink/7 px-2.5 py-3', stickyBg)}
-                          style={{ width: 44 }}>
-                        <span className="font-mono font-bold text-xs text-ink/60">
-                          {pe.order_label ?? '—'}
-                        </span>
-                      </td>
-
-                      {/* Exercise name */}
-                      <td className={cn('sticky z-10 border-b border-r border-ink/7 px-3 py-2.5', stickyBg)}
-                          style={{ left: 44, minWidth: 148 }}>
-                        <p className="font-sans font-semibold text-sm text-ink leading-tight">{exName}</p>
-                        {exType && (
-                          <p className="text-[10px] text-ink/35 mt-0.5 capitalize font-sans">{exType}</p>
-                        )}
-                        {pe.is_amrap && (
-                          <span className="mt-1 inline-flex items-center rounded-full bg-amber/15 border border-amber/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber leading-none">
-                            🔥 AMRAP
-                          </span>
-                        )}
-                        {pe.exercise?.video_url && (
-                          <div className="mt-1">
-                            <TechniqueButton url={pe.exercise.video_url} exerciseName={exName} />
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Target */}
-                      <td className={cn('border-b border-r border-ink/7 px-3 py-2.5', rowTint ? 'bg-ink/[0.018]' : '')}
-                          style={{ width: 96 }}
-                          title={targetTip}>
-                        <p className="font-mono text-[11px] text-ink/65 whitespace-nowrap">{targetLabel}</p>
-                        {pe.rir_target != null && !pe.is_amrap && (
-                          <p className="font-mono text-[10px] text-ink/35">RIR {pe.rir_target}</p>
-                        )}
-                        {pe.target_percentage_1rm != null && (
-                          <p className="font-mono text-[10px] text-danger/55 font-semibold">
-                            {pe.target_percentage_1rm}% 1RM
-                          </p>
-                        )}
-                      </td>
-
-                      {/* Set input cells */}
-                      {Array.from({ length: MAX_SETS }, (_, setIdx) => {
-                        const setNum    = setIdx + 1
-                        const cellKey   = `${exerciseId}:${setNum}`
-                        const cell      = grid[cellKey] ?? { setId: null, kg: '', reps: '', rir: '' }
-                        const saveState = cellSave[cellKey] ?? 'idle'
-                        const isTarget  = setNum <= targetSets
-                        const setDone   = !!(cell.kg && cell.reps)  // cả kg + reps → đạt (herb)
-
-                        return (
-                          <td key={setIdx}
-                              className={cn(
-                                'border-b border-r border-ink/7 px-1.5 py-2',
-                                rowTint ? 'bg-ink/[0.018]' : '',
-                                !isTarget && 'opacity-35',
-                              )}
-                              style={{ width: 134 }}>
-                            <div className="flex items-center gap-1.5">
-                              {/* Kg */}
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.5"
-                                min="0"
-                                placeholder="—"
-                                disabled={isCompleted}
-                                value={cell.kg}
-                                onChange={e => updateCell(exerciseId, setNum, 'kg', e.target.value)}
-                                onBlur={() => flushCell(exerciseId, setNum)}
-                                aria-label={`${exName} hiệp ${setNum} kg`}
-                                className={cn(
-                                  'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
-                                  'placeholder:text-ink/30 disabled:cursor-not-allowed',
-                                  setDone
-                                    ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
-                                    : cell.kg
-                                      ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
-                                      : 'bg-bone border-[#C7BCA4] text-ink/45',
-                                  saveState === 'saving' && 'border-amber animate-pulse',
-                                  saveState === 'error'  && 'border-danger/60 bg-danger/5',
-                                  !isCompleted && 'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
-                                )}
-                              />
-                              {/* Reps */}
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                placeholder="—"
-                                disabled={isCompleted}
-                                value={cell.reps}
-                                onChange={e => updateCell(exerciseId, setNum, 'reps', e.target.value)}
-                                onBlur={() => flushCell(exerciseId, setNum)}
-                                aria-label={`${exName} hiệp ${setNum} reps`}
-                                className={cn(
-                                  'h-8 w-[40px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
-                                  'placeholder:text-ink/30 disabled:cursor-not-allowed',
-                                  setDone
-                                    ? 'bg-herb-wash border-herb text-herb-deep font-semibold'
-                                    : cell.reps
-                                      ? 'bg-bone border-[#C7BCA4] text-ink font-semibold'
-                                      : 'bg-bone border-[#C7BCA4] text-ink/45',
-                                  saveState === 'saving' && 'border-amber animate-pulse',
-                                  saveState === 'error'  && 'border-danger/60 bg-danger/5',
-                                  !isCompleted && 'hover:border-ink/40 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
-                                )}
-                              />
-                              {/* RIR — số lần còn dự trữ khi dừng hiệp (autoregulation) */}
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                max="10"
-                                placeholder="—"
-                                disabled={isCompleted}
-                                value={cell.rir}
-                                onChange={e => updateCell(exerciseId, setNum, 'rir', e.target.value)}
-                                onBlur={() => flushCell(exerciseId, setNum)}
-                                aria-label={`${exName} hiệp ${setNum} RIR`}
-                                title="RIR — số reps còn dự trữ khi dừng hiệp"
-                                className={cn(
-                                  'h-8 w-[32px] rounded-md border text-center text-sm font-mono tabular-nums outline-none transition-colors',
-                                  'placeholder:text-ink/25 disabled:cursor-not-allowed',
-                                  cell.rir
-                                    ? 'bg-amber/8 border-amber/40 text-amber font-semibold'
-                                    : 'bg-bone/60 border-[#D8CDB6] text-ink/40',
-                                  saveState === 'saving' && 'border-amber animate-pulse',
-                                  saveState === 'error'  && 'border-danger/60 bg-danger/5',
-                                  !isCompleted && 'hover:border-amber/60 focus:border-amber focus:ring-[3px] focus:ring-amber/12',
-                                )}
-                              />
-                            </div>
-                          </td>
-                        )
-                      })}
-
-                      {/* Ghi chú */}
-                      <td className={cn('border-b border-ink/7 px-2 py-2', rowTint ? 'bg-ink/[0.018]' : '')}
-                          style={{ minWidth: 104 }}>
-                        <input
-                          type="text"
-                          placeholder="—"
-                          maxLength={120}
-                          disabled={isCompleted}
-                          value={exerciseNotes[exerciseId] ?? ''}
-                          onChange={e =>
-                            setExerciseNotes(prev => ({ ...prev, [exerciseId]: e.target.value }))
-                          }
-                          aria-label={`${exName} ghi chú`}
-                          className="h-8 w-full rounded border border-ink/10 bg-transparent px-2 text-xs text-ink/70 placeholder:text-ink/18 outline-none focus:border-ink/30 focus:bg-ink/3 transition-colors disabled:cursor-not-allowed"
-                        />
-                      </td>
-                    </tr>
-
-                    {/* ── Intra-session load guidance row (Eric Helms) ── */}
-                    {guidance && (
-                      <tr>
-                        <td
-                          colSpan={3 + MAX_SETS + 1}
-                          className={cn('border-b border-ink/7 px-3 py-1.5', rowTint ? 'bg-ink/[0.018]' : '')}
-                        >
-                          <div className={cn(
-                            'flex items-start gap-2 rounded-lg border px-3 py-1.5',
-                            guidance.status === 'in_range'
-                              ? 'border-herb/25 bg-herb/6'
-                              : 'border-amber/30 bg-amber/8',
-                          )}>
-                            <span className="text-sm leading-none mt-0.5 shrink-0">
-                              {guidance.status === 'too_light' ? '⬆️'
-                                : guidance.status === 'too_heavy' ? '⬇️'
-                                : guidance.progressReady ? '🎯' : '✓'}
-                            </span>
-                            <p className={cn(
-                              'text-[11px] leading-relaxed',
-                              guidance.status === 'in_range' ? 'text-herb-deep' : 'text-amber',
-                            )}>
-                              {guidance.message}
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── Action bar ── */}
-      {!isCompleted && (
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={finishSession}
-            disabled={finishing || !hasAnyData}
-            className="rounded-xl bg-herb text-paper font-semibold px-6 py-3 text-sm hover:bg-herb/90 disabled:opacity-50 active:scale-[0.98] transition-all flex items-center gap-2.5 shadow-sm"
-          >
-            {finishing ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-paper/30 border-t-paper" />
-            ) : (
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-            Hoàn thành buổi tập
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push('/workouts')}
-            className="rounded-xl border border-ink/15 px-5 py-3 text-sm font-medium text-ink/50 hover:text-ink hover:border-ink/25 transition-colors"
-          >
-            ← Quay lại
-          </button>
-
-          {anySaving && (
-            <span className="flex items-center gap-1.5 text-xs text-ink/35">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber animate-pulse" />
-              Đang lưu…
-            </span>
-          )}
-          {anyError && !anySaving && (
-            <span className="flex items-center gap-1.5 text-xs text-danger/65">
-              <span className="h-1.5 w-1.5 rounded-full bg-danger" />
-              Lỗi lưu — kiểm tra kết nối
-            </span>
-          )}
-        </div>
-      )}
-
-      {isCompleted && (
-        <button
-          type="button"
-          onClick={() => router.push('/workouts')}
-          className="rounded-xl border border-ink/15 px-5 py-3 text-sm font-medium text-ink/50 hover:text-ink hover:border-ink/25 transition-colors"
-        >
-          ← Quay lại nhật ký
-        </button>
+        <ExerciseMatrix
+          rows={sortedRows}
+          grid={grid}
+          activeSets={activeSets}
+          cellSave={cellSave}
+          exerciseNotes={exerciseNotes}
+          onNoteChange={(exId, v) => setExerciseNotes(prev => ({ ...prev, [exId]: v }))}
+          onCellChange={(exId, setNum, field, v) => updateCell(exId, setNum, field, v)}
+          onCellBlur={(exId, setNum) => flushCell(exId, setNum)}
+          overloadSuggestions={{}}
+          isOverloadWeek={false}
+          isPeaking={isPeaking}
+          scopeKey={`${activeWeek}:${activeDayId ?? 'all'}`}
+          legendLabel={`${sortedRows.length} bài tập`}
+          sessionCompleted={isCompleted}
+          sessionCreating={false}
+          anySaving={anySaving}
+          anyError={anyError}
+          // Nút lưu nằm ở khu vực "Hoàn thành buổi tập" ngay bên dưới (sau phần
+          // đánh giá buổi tập) nên tắt nút lưu trong thẻ để khỏi trùng.
+          onSaveSession={finishSession}
+          saveDisabled={finishing || !hasAnyData}
+          showMobileSave={false}
+          readOnly={isCompleted}
+        />
       )}
 
       {/* ── Đánh giá buổi tập (Post-workout micro-survey) ── */}
@@ -1027,6 +712,58 @@ export function WorkoutLogger({
             )}
           </div>
         </div>
+      )}
+
+      {/* ── Action bar ── */}
+      {!isCompleted && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={finishSession}
+            disabled={finishing || !hasAnyData}
+            className="rounded-xl bg-herb text-paper font-semibold px-6 py-3 text-sm hover:bg-herb/90 disabled:opacity-50 active:scale-[0.98] transition-all flex items-center gap-2.5 shadow-sm"
+          >
+            {finishing ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-paper/30 border-t-paper" />
+            ) : (
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            Hoàn thành buổi tập
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.push('/workouts')}
+            className="rounded-xl border border-ink/15 px-5 py-3 text-sm font-medium text-ink/50 hover:text-ink hover:border-ink/25 transition-colors"
+          >
+            ← Quay lại
+          </button>
+
+          {anySaving && (
+            <span className="flex items-center gap-1.5 text-xs text-ink/35">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber animate-pulse" />
+              Đang lưu…
+            </span>
+          )}
+          {anyError && !anySaving && (
+            <span className="flex items-center gap-1.5 text-xs text-danger/65">
+              <span className="h-1.5 w-1.5 rounded-full bg-danger" />
+              Lỗi lưu — kiểm tra kết nối
+            </span>
+          )}
+        </div>
+      )}
+
+      {isCompleted && (
+        <button
+          type="button"
+          onClick={() => router.push('/workouts')}
+          className="rounded-xl border border-ink/15 px-5 py-3 text-sm font-medium text-ink/50 hover:text-ink hover:border-ink/25 transition-colors"
+        >
+          ← Quay lại nhật ký
+        </button>
       )}
 
       {/* ── Footer ────────────────────────────────────────────────────────── */}

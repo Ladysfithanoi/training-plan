@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 
 interface ModalProps {
@@ -19,6 +20,11 @@ const sizeClasses = {
 }
 
 export function Modal({ open, onClose, title, children, className, size = 'md' }: ModalProps) {
+  // Portal target — only available after mount (SSR has no document).
+  const [mounted, setMounted] = useState(false)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setMounted(true) }, [])
+
   // Close on Escape
   useEffect(() => {
     if (!open) return
@@ -29,9 +35,18 @@ export function Modal({ open, onClose, title, children, className, size = 'md' }
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  if (!open) return null
+  // Khoá cuộn nền khi modal mở — trên iOS Safari nếu không khoá thì trang nền
+  // vẫn cuộn dưới lớp phủ và modal có thể bị "trôi" khỏi màn hình.
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [open])
 
-  return (
+  if (!open || !mounted) return null
+
+  const panel = (
     <div
       role="dialog"
       aria-modal
@@ -76,4 +91,9 @@ export function Modal({ open, onClose, title, children, className, size = 'md' }
       </div>
     </div>
   )
+
+  // Portal ra thẳng <body>: nếu render tại chỗ, modal nằm bên trong bảng có
+  // `overflow-x-auto` / `overflow-hidden` sẽ bị iOS Safari cắt mất — đó là lý do
+  // nút "Xem kỹ thuật" trong bảng bài tập bấm trên iPhone không hiện video.
+  return createPortal(panel, document.body)
 }

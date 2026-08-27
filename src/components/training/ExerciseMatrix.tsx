@@ -45,6 +45,12 @@ interface ExerciseMatrixProps {
   /** Mobile-only "Lưu buổi tập" handler, rendered under the last focus card. */
   onSaveSession:       () => void
   saveDisabled:        boolean
+  /**
+   * Hiện nút "Lưu buổi tập" cuối thẻ bài tập cuối cùng (mặc định: có). Tắt khi
+   * trang gọi đã có khu vực kết thúc buổi tập riêng ngay bên dưới ma trận —
+   * tránh hai nút lưu trùng nhau trên điện thoại.
+   */
+  showMobileSave?:     boolean
   /** Read-only history view (past weeks): inputs are locked, save is hidden. */
   readOnly?:           boolean
   /**
@@ -130,6 +136,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
     overloadSuggestions, isOverloadWeek, isPeaking, scopeKey, legendLabel,
     sessionCompleted, sessionCreating, anySaving, anyError,
     onSaveSession, saveDisabled, readOnly = false, prevWeekRefs,
+    showMobileSave = true,
   } = props
 
   // ── Mobile focus index + per-exercise extra-set reveal ────────────────────
@@ -427,6 +434,7 @@ export function ExerciseMatrix(props: ExerciseMatrixProps) {
           sessionCompleted={sessionCompleted}
           onSaveSession={onSaveSession}
           saveDisabled={saveDisabled}
+          showMobileSave={showMobileSave}
           readOnly={readOnly}
           prevWeekRefs={prevWeekRefs}
         />
@@ -457,6 +465,7 @@ interface MobileFocusProps {
   sessionCompleted:    boolean
   onSaveSession:       () => void
   saveDisabled:        boolean
+  showMobileSave:      boolean
   readOnly:            boolean
   prevWeekRefs?:       Record<string, PrevWeekRef>
 }
@@ -687,7 +696,7 @@ function MobileFocus(p: MobileFocusProps) {
       </div>
 
       {/* ── Save on last card ─────────────────────────────────────────────── */}
-      {isLast && !p.sessionCompleted && !p.readOnly && (
+      {isLast && p.showMobileSave && !p.sessionCompleted && !p.readOnly && (
         <button type="button" onClick={p.onSaveSession} disabled={p.saveDisabled}
           className="w-full rounded-xl bg-herb text-paper font-bold py-3.5 text-base hover:bg-herb/90 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 shadow-sm">
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
