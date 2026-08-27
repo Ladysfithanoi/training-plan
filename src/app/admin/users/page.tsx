@@ -24,10 +24,12 @@ export default async function AdminUsersPage() {
 
   const { data: users } = await usersQuery
 
+  // Kèm mô tả + số meso + số tuần để ô tìm giáo án hiển thị đủ thông tin và
+  // sắp xếp được (tìm theo tên/mô tả, lọc theo thời lượng…).
   const { data: blocks } = await supabase
     .from('training_blocks')
-    .select('id, name')
-    .order('name')
+    .select('id, name, description, total_mesocycles, created_at, phases(id, duration_weeks, phase_order)')
+    .order('created_at', { ascending: false })
 
   return (
     <div className="space-y-8">

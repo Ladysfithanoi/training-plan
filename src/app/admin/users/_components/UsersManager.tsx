@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
+import { BlockSearchPicker } from '@/components/programs/BlockSearchPicker'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 import { trialState } from '@/lib/trial'
@@ -553,7 +554,7 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => setAssignOpen(user)}
+                          onClick={() => { setSelectedBlock(''); setAssignOpen(user) }}
                           className="shrink-0"
                         >
                           Giáo án
@@ -733,13 +734,18 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
         title={`Giao giáo án cho ${assignOpen?.full_name ?? assignOpen?.email}`}
       >
         <div className="space-y-4">
-          <Select
-            label="Khối tập luyện"
-            value={selectedBlock}
-            onChange={e => setSelectedBlock(e.target.value)}
-            options={blocks.map(b => ({ value: b.id, label: b.name }))}
-            placeholder="Chọn khối tập..."
-          />
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+              Khối tập luyện
+            </span>
+            <BlockSearchPicker
+              blocks={blocks}
+              selectedBlockId={selectedBlock}
+              onSelect={setSelectedBlock}
+              pageSize={3}
+              placeholder="Tìm giáo án theo tên…"
+            />
+          </div>
           <Input
             label="Ngày bắt đầu"
             type="date"
