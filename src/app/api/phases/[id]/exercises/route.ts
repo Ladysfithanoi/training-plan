@@ -74,6 +74,14 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
     loading_style: body.loading_style ?? 'horizontal',
   }
 
+  // Same rep-window guard as PATCH: a row is never created with an inverted
+  // range, so nothing downstream has to cope with min > max.
+  base.target_rep_min = Math.max(1, Math.trunc(Number(base.target_rep_min) || 8))
+  base.target_rep_max = Math.max(1, Math.trunc(Number(base.target_rep_max) || 12))
+  if (base.target_rep_min > base.target_rep_max) {
+    ;[base.target_rep_min, base.target_rep_max] = [base.target_rep_max, base.target_rep_min]
+  }
+
   // Best-effort: append the new exercise to the end of its (phase, day) by
   // computing the next sort_order. Tolerates the column not existing yet.
   let nextSortOrder: number | undefined
@@ -150,7 +158,14 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
   // apply when a truthy value is supplied (never allow it to be cleared).
   if (body.exercise_id) patch.exercise_id = body.exercise_id
   for (const k of numericFields) {
-    if (k in body) patch[k] = body[k] ?? null   // allow null to clear %1RM
+    if (!(k in body)) continue
+    if (body[k] === null || body[k] === undefined || body[k] === '') {
+      patch[k] = null                            // allow null to clear %1RM
+      continue
+    }
+    const n = Number(body[k])
+    if (Number.isNaN(n)) continue                // ignore junk rather than storing it
+    patch[k] = k === 'target_rep_min' || k === 'target_rep_max' ? Math.max(1, Math.trunc(n)) : n
   }
   for (const k of stringFields) {
     if (k in body) patch[k] = body[k] ?? null
@@ -161,6 +176,40 @@ export async function PATCH(request: Request, ctx: RouteContext<'/api/phases/[id
 
   if (Object.keys(patch).length === 0) {
     return Response.json({ error: 'No valid fields to update' }, { status: 400 })
+  }
+
+  // ── Rep-window guard ───────────────────────────────────────────────────────
+  // An inverted window (min 10 / max 1) must never reach the table, whatever the
+  // client sends. When only one bound is being patched it is compared against
+  // the bound already stored, and the bound the coach just typed wins.
+  const hasRepMin = 'target_rep_min' in patch
+  const hasRepMax = 'target_rep_max' in patch
+  if (hasRepMin || hasRepMax) {
+    let repMin = patch.target_rep_min as number | null | undefined
+    let repMax = patch.target_rep_max as number | null | undefined
+
+    if (!hasRepMin || !hasRepMax) {
+      const { data: current } = await supabase
+        .from('phase_exercises')
+        .select('target_rep_min, target_rep_max')
+        .eq('id', phaseExerciseId)
+        .eq('phase_id', id)
+        .single()
+      if (!hasRepMin) repMin = current?.target_rep_min ?? null
+      if (!hasRepMax) repMax = current?.target_rep_max ?? null
+    }
+
+    if (repMin != null && repMax != null && repMin > repMax) {
+      if (hasRepMin && hasRepMax) {
+        // Both bounds sent the wrong way round → order them.
+        patch.target_rep_min = repMax
+        patch.target_rep_max = repMin
+      } else if (hasRepMin) {
+        patch.target_rep_max = repMin   // raising the floor lifts the ceiling
+      } else {
+        patch.target_rep_min = repMax   // lowering the ceiling drops the floor
+      }
+    }
   }
 
   // Attempt 1: update with all requested fields.

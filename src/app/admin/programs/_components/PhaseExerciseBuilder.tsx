@@ -268,6 +268,75 @@ function splitSig(type: SplitType | null, days: SplitDay[]): string {
   })
 }
 
+/** The inline numeric fields of the prescription table, with their legal bounds. */
+type NumericField = 'target_sets' | 'target_rep_min' | 'target_rep_max' | 'rir_target'
+
+const NUMERIC_LIMITS: Record<NumericField, { min: number; max: number }> = {
+  target_sets:    { min: 1, max: 10 },
+  target_rep_min: { min: 1, max: 100 },
+  target_rep_max: { min: 1, max: 100 },
+  rir_target:     { min: 0, max: 10 },
+}
+
+/**
+ * Read a numeric form field, clamped to what the column may legally hold.
+ * A blank / non-numeric entry keeps `fallback` — the value already stored —
+ * rather than collapsing to a constant like 1.
+ */
+function parseNumericField(field: NumericField, raw: string, fallback: number): number {
+  const n = parseInt(raw, 10)
+  if (Number.isNaN(n)) return fallback
+  const { min, max } = NUMERIC_LIMITS[field]
+  return Math.min(max, Math.max(min, n))
+}
+
+/**
+ * One inline number cell in the prescription table.
+ *
+ * Typing only moves a LOCAL draft — the PATCH fires once, on blur or Enter.
+ * The previous version saved on every keystroke, so editing "8" → "10" sent two
+ * writes ({…:1} then {…:10}). Those requests race: when the first landed last,
+ * the DB kept the intermediate digit and the coach's rep window snapped back to
+ * things like 1-1 or 10-1 the next time the meso was opened.
+ *
+ * Escape abandons the draft, so a half-typed number can always be backed out of.
+ */
+function InlineNumberCell({
+  value, field, title, onCommit,
+}: {
+  value:    number | null | undefined
+  field:    NumericField
+  title:    string
+  onCommit: (raw: string) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const limits = NUMERIC_LIMITS[field]
+
+  function commit() {
+    const raw = draft
+    setDraft(null)
+    if (raw !== null) onCommit(raw)
+  }
+
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      title={title}
+      value={draft ?? String(value ?? '')}
+      min={limits.min}
+      max={limits.max}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter')  e.currentTarget.blur()
+        if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur() }
+      }}
+      className="w-12 text-center bg-transparent border border-transparent focus:border-amber/50 rounded focus:outline-none text-sm font-mono tabular-nums text-ink"
+    />
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns, selectedBlockId, onBlocksChange }: Props) {
@@ -322,6 +391,11 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   // meso's slow fetch from resolving last and repainting another meso's view with
   // the wrong (previous-meso) exercises.
   const loadReqRef = useRef(0)
+  // Monotonic token per phase_exercise row for inline numeric writes. Tabbing
+  // quickly across Sets / Rep Min / Rep Max fires several PATCHes on the same
+  // row; only the newest one is allowed to roll the table back on failure, so a
+  // slow earlier response can never resurrect a superseded number.
+  const numericSeqRef = useRef<Record<string, number>>({})
 
   // ── Split config ────────────────────────────────────────────────────────────
   const [splitType, setSplitType]     = useState<SplitType | null>(null)
@@ -1086,6 +1160,13 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       setAddError('Hãy bấm “Tùy chỉnh tuần này” trước khi thêm bài cho tuần.')
       return
     }
+    const repMin = parseNumericField('target_rep_min', targetRepMin, 1)
+    const repMax = parseNumericField('target_rep_max', targetRepMax, isStrengthContext ? 3 : 12)
+    if (repMin > repMax) {
+      setAddError('Rep tối thiểu không được lớn hơn Rep tối đa.')
+      return
+    }
+
     setAdding(true)
     setAddError(null)
 
@@ -1100,9 +1181,9 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         exercise_id:   selectedExercise,
-        target_sets:   parseInt(targetSets)   || 3,
-        target_rep_min: parseInt(targetRepMin) || 1,
-        target_rep_max: parseInt(targetRepMax) || (isStrengthContext ? 3 : 12),
+        target_sets:   parseNumericField('target_sets', targetSets, 3),
+        target_rep_min: repMin,
+        target_rep_max: repMax,
         day_id:        effectiveDayId,
         order_label:   effectiveLabel,
         loading_style: loadingStyle,
@@ -1203,6 +1284,16 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   /** Persist all edited fields in a single PATCH; replace the row from the join. */
   async function handleSaveEdit() {
     if (!editingExercise || !editExerciseId) return
+
+    // Blank fields keep whatever is already stored — clearing a box must never
+    // silently rewrite the prescription to a default like 1.
+    const repMin = parseNumericField('target_rep_min', editRepMin, editingExercise.target_rep_min ?? 8)
+    const repMax = parseNumericField('target_rep_max', editRepMax, editingExercise.target_rep_max ?? 12)
+    if (repMin > repMax) {
+      setEditError('Rep tối thiểu không được lớn hơn Rep tối đa.')
+      return
+    }
+
     setEditSaving(true)
     setEditError(null)
 
@@ -1213,9 +1304,9 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           exercise_id:    editExerciseId,
-          target_sets:    parseInt(editSets)   || 3,
-          target_rep_min: parseInt(editRepMin) || 1,
-          target_rep_max: parseInt(editRepMax) || (isStrengthContext ? 3 : 12),
+          target_sets:    parseNumericField('target_sets', editSets, editingExercise.target_sets ?? 3),
+          target_rep_min: repMin,
+          target_rep_max: repMax,
           order_label:    editOrderLabel.trim().toUpperCase() || null,
           loading_style:  editLoadingStyle,
 
@@ -1454,26 +1545,67 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     }
   }
 
+  /**
+   * Persist one inline numeric cell. Called once per edit (on blur / Enter),
+   * never per keystroke — see InlineNumberCell for why that distinction matters.
+   *
+   * A blank or non-numeric entry is discarded and the stored value stands; the
+   * cell re-renders from state, so the coach sees exactly what the DB holds.
+   */
   async function handleUpdateNumeric(
-    phaseExerciseId: string,
-    field: 'target_sets' | 'target_rep_min' | 'target_rep_max' | 'rir_target',
+    pe: PhaseExerciseRow,
+    field: NumericField,
     value: string,
   ) {
-    const numVal = parseInt(value)
-    if (isNaN(numVal)) return
+    const parsed = parseInt(value, 10)
+    if (Number.isNaN(parsed)) return
+
+    const limits = NUMERIC_LIMITS[field]
+    const numVal = Math.min(limits.max, Math.max(limits.min, parsed))
+
+    const patch: Partial<Record<NumericField, number>> = { [field]: numVal }
+
+    // Keep the rep window the right way round: pushing the floor above the
+    // ceiling (or the ceiling below the floor) drags the other bound along
+    // instead of storing an impossible range like 10-1.
+    if (field === 'target_rep_min' && numVal > (pe.target_rep_max ?? numVal)) {
+      patch.target_rep_max = numVal
+    }
+    if (field === 'target_rep_max' && numVal < (pe.target_rep_min ?? numVal)) {
+      patch.target_rep_min = numVal
+    }
+
+    const entries = Object.entries(patch) as [NumericField, number][]
+    if (entries.every(([k, v]) => pe[k] === v)) return   // nothing actually changed
+
+    // Snapshot the stored values so a failed write can be rolled back.
+    const before = Object.fromEntries(entries.map(([k]) => [k, pe[k]]))
 
     setPhaseExercises(prev =>
-      prev.map(pe => pe.id === phaseExerciseId ? { ...pe, [field]: numVal } : pe),
+      prev.map(row => row.id === pe.id ? { ...row, ...patch } : row),
     )
 
-    await fetch(
-      `/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${phaseExerciseId}`,
+    const seq = (numericSeqRef.current[pe.id] ?? 0) + 1
+    numericSeqRef.current[pe.id] = seq
+
+    const res = await fetch(
+      `/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${pe.id}`,
       {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ [field]: numVal }),
+        body:    JSON.stringify(patch),
       },
     )
+
+    // A newer edit on this row has already been sent — it owns the cell now.
+    if (numericSeqRef.current[pe.id] !== seq) return
+
+    if (!res.ok) {
+      // Never leave the table showing a number the DB doesn't have.
+      setPhaseExercises(prev =>
+        prev.map(row => row.id === pe.id ? { ...row, ...before } : row),
+      )
+    }
   }
 
   // ── Inline STT (order_label) editing ─────────────────────────────────────────
@@ -3036,31 +3168,27 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
 
                       {/* ── Inline numeric fields ── */}
                       <td className="px-4 py-2.5 text-center">
-                        <input
-                          type="number" value={pe.target_sets} min={1} max={10}
-                          onChange={e => void handleUpdateNumeric(pe.id, 'target_sets', e.target.value)}
-                          className="w-12 text-center bg-transparent border border-transparent focus:border-amber/50 rounded focus:outline-none text-sm font-medium font-mono tabular-nums text-ink"
+                        <InlineNumberCell
+                          value={pe.target_sets} field="target_sets" title="Số hiệp"
+                          onCommit={raw => void handleUpdateNumeric(pe, 'target_sets', raw)}
                         />
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        <input
-                          type="number" value={pe.target_rep_min} min={1}
-                          onChange={e => void handleUpdateNumeric(pe.id, 'target_rep_min', e.target.value)}
-                          className="w-12 text-center bg-transparent border border-transparent focus:border-amber/50 rounded focus:outline-none text-sm font-mono tabular-nums text-ink"
+                        <InlineNumberCell
+                          value={pe.target_rep_min} field="target_rep_min" title="Rep tối thiểu"
+                          onCommit={raw => void handleUpdateNumeric(pe, 'target_rep_min', raw)}
                         />
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        <input
-                          type="number" value={pe.target_rep_max} min={1}
-                          onChange={e => void handleUpdateNumeric(pe.id, 'target_rep_max', e.target.value)}
-                          className="w-12 text-center bg-transparent border border-transparent focus:border-amber/50 rounded focus:outline-none text-sm font-mono tabular-nums text-ink"
+                        <InlineNumberCell
+                          value={pe.target_rep_max} field="target_rep_max" title="Rep tối đa"
+                          onCommit={raw => void handleUpdateNumeric(pe, 'target_rep_max', raw)}
                         />
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        <input
-                          type="number" value={pe.rir_target} min={0} max={10}
-                          onChange={e => void handleUpdateNumeric(pe.id, 'rir_target', e.target.value)}
-                          className="w-12 text-center bg-transparent border border-transparent focus:border-amber/50 rounded focus:outline-none text-sm font-mono tabular-nums text-ink"
+                        <InlineNumberCell
+                          value={pe.rir_target} field="rir_target" title="RIR mục tiêu"
+                          onCommit={raw => void handleUpdateNumeric(pe, 'rir_target', raw)}
                         />
                       </td>
 
