@@ -8,6 +8,13 @@ import type { Profile, PhaseExercise, Exercise } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
+// Non-athlete accounts also log workouts, so the header names the account kind.
+const ROLE_LABEL: Record<string, string> = {
+  admin: 'Quản trị viên',
+  coach: 'Huấn luyện viên',
+  trial: 'Trải nghiệm',
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   return { title: 'Tiến độ học viên' }
 }
@@ -27,7 +34,11 @@ export default async function AthleteDetailPage({
     .eq('id', id)
     .maybeSingle()
 
-  if (!profile || profile.role !== 'user') notFound()
+  // Any profile the viewer is allowed to read can be opened here — RLS already
+  // limits `profiles` to self, own students, or everything for an admin. The
+  // dashboard feed also lists staff sessions (coach / trial / admin), so
+  // filtering on role === 'user' turned those "Chi tiết →" links into a 404.
+  if (!profile) notFound()
 
   // ── Active user_program with block + phase ─────────────────────────────────
   const { data: userProgram } = await supabase
@@ -113,9 +124,16 @@ export default async function AthleteDetailPage({
             {((profile as Profile).full_name ?? (profile as Profile).email)[0]?.toUpperCase()}
           </div>
           <div>
-            <h1 className="text-xl font-bold text-ink">
-              {(profile as Profile).full_name ?? '—'}
-            </h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-bold text-ink">
+                {(profile as Profile).full_name ?? '—'}
+              </h1>
+              {ROLE_LABEL[(profile as Profile).role] && (
+                <span className="rounded-full border border-ink/15 bg-ink/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/50">
+                  {ROLE_LABEL[(profile as Profile).role]}
+                </span>
+              )}
+            </div>
             <p className="text-sm text-ink/45">{(profile as Profile).email}</p>
           </div>
         </div>
