@@ -12,6 +12,8 @@ import { ImportScheduleExcelModal } from './ImportScheduleExcelModal'
 import type { ImportResult } from './ImportScheduleExcelModal'
 import { ImportProgramExcelModal } from './ImportProgramExcelModal'
 import type { ProgramImportResult } from './ImportProgramExcelModal'
+import { ImportWeekExcelModal } from './ImportWeekExcelModal'
+import type { WeekImportResult } from './ImportWeekExcelModal'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import {
   recommendSplit,
@@ -453,6 +455,10 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   // ── Excel import (whole meso — one sheet per week) ───────────────────────────
   const [programImportOpen, setProgramImportOpen]       = useState(false)
   const [programImportSummary, setProgramImportSummary] = useState<ProgramImportResult | null>(null)
+
+  // ── Excel import (every buổi tập of the week being viewed) ───────────────────
+  const [weekImportOpen, setWeekImportOpen]       = useState(false)
+  const [weekImportSummary, setWeekImportSummary] = useState<WeekImportResult | null>(null)
 
   // ── Add exercise form ────────────────────────────────────────────────────────
   const [addOpen, setAddOpen]             = useState(false)
@@ -1864,6 +1870,59 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     })
   }
 
+  // ── One-week Excel import (every buổi tập of the week being viewed) ───────────
+  // Same contract as the whole-program import, except only ONE week scope was
+  // rewritten server-side: the returned rows are still the meso's full state, so
+  // the table adopts them wholesale while the week tab stays where it was.
+  function handleWeekImported(result: WeekImportResult) {
+    setPhaseExercises(result.exercises)
+    mergeLibraryFrom(result.exercises)
+
+    // The file may have introduced new buổi tập; they arrive appended to the
+    // meso's existing days, so the split config just adopts the new list.
+    setSplitType(result.splitType)
+    setSplitDays(result.splitDays)
+    setSavedConfig({ type: result.splitType, days: result.splitDays })
+    // Stay on the active day when it survived, otherwise land on the first one
+    // the file wrote so the coach immediately sees what landed.
+    setActiveDayId(prev =>
+      prev && result.splitDays.some(d => d.id === prev) ? prev : (result.splitDays[0]?.id ?? null),
+    )
+    setSelectedOrphanIds(new Set())
+    setCopySourceDayId(null)
+
+    const phase = result.phase
+    if (phase) {
+      updateBlocks(prev => prev.map(b =>
+        b.id === selectedBlockId
+          ? { ...b, phases: (b.phases ?? []).map(p => p.id === selectedPhaseId ? { ...p, ...phase } : p) }
+          : b,
+      ))
+    }
+
+    setWeekImportSummary(result)
+
+    // New day slots must reach workout_days, and Gốc rows their day_exercises,
+    // without the coach having to press "Lưu cấu hình giáo án" afterwards.
+    void fetch(`/api/phases/${selectedPhaseId}/commit-days`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        split_type: result.splitType,
+        split_days: result.splitDays.map(d => ({ id: d.id, type: d.type, label: d.label })),
+        // day_exercises mirrors the BASE day structure only (see handleSaveConfig).
+        phase_exercises: result.exercises
+          .filter(pe => (pe.week_number ?? null) === null)
+          .map(pe => ({
+            id:            pe.id,
+            day_id:        pe.day_id        ?? null,
+            order_label:   pe.order_label   ?? null,
+            loading_style: pe.loading_style ?? 'horizontal',
+          })),
+      }),
+    })
+  }
+
   // ── Copy whole sessions (buổi) from another Meso into THIS meso ────────────────
   // For each selected source day we CREATE a new day in the current split (draft,
   // persisted when the coach saves the config) and clone all of that day's
@@ -2156,6 +2215,16 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
                   {weekBusy && (
                     <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber border-t-transparent" />
                   )}
+                  {/* One-week import: every buổi tập of the week being viewed. */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => { setWeekImportSummary(null); setWeekImportOpen(true) }}
+                    disabled={!selectedPhaseId}
+                    title={`Nhập tất cả buổi tập của ${selectedWeek == null ? 'bộ Gốc' : `Tuần ${selectedWeek}`} từ một file Excel`}
+                  >
+                    ⬆ Nhập cả tuần ({selectedWeek == null ? 'Gốc' : `Tuần ${selectedWeek}`})
+                  </Button>
                   {/* Whole-meso import: each sheet of the workbook becomes a week. */}
                   <Button
                     size="sm"
@@ -2239,6 +2308,41 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Result of the last one-week import — only that week changed. */}
+          {weekImportSummary && (
+            <div className="rounded-xl border border-herb/25 bg-herb/6 px-4 py-3 flex items-start gap-3">
+              <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-xs font-semibold text-herb">
+                  Đã nhập {weekImportSummary.dayCount} buổi tập vào{' '}
+                  {weekImportSummary.week == null ? 'bộ Gốc' : `Tuần ${weekImportSummary.week}`}
+                  {' '}({weekImportSummary.added} dòng bài tập)
+                </p>
+                <p className="text-[11px] text-ink/60 leading-relaxed">
+                  {weekImportSummary.week == null
+                    ? 'Bộ Gốc áp dụng cho mọi tuần chưa có bản riêng.'
+                    : 'Các tuần khác giữ nguyên — chọn tab tuần ở trên để nhập tiếp tuần kế.'}
+                </p>
+                {weekImportSummary.createdExercises.length > 0 && (
+                  <p className="text-[11px] text-ink/60 leading-relaxed">
+                    {weekImportSummary.createdExercises.length} bài tập mới đã được thêm vào Kho bài tập
+                    ({weekImportSummary.createdExercises.map(e => e.name).join(', ')}) — mới chỉ có tên,
+                    hãy vào <span className="font-semibold">Thư viện</span> để điền loại bài, chuỗi
+                    chuyển động và nhóm cơ.
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setWeekImportSummary(null)}
+                aria-label="Đóng thông báo"
+                className="shrink-0 h-6 w-6 flex items-center justify-center rounded text-ink/30 hover:text-ink hover:bg-ink/6 transition-colors"
+              >
+                ✕
+              </button>
             </div>
           )}
 
@@ -3771,6 +3875,21 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           dayLabel={splitType ? (activeDay?.label ?? null) : null}
           weekNumber={selectedWeek}
           onImported={handleImported}
+        />
+      )}
+
+      {/* ── Nhập tất cả buổi tập của MỘT tuần ─────────────────────────────── */}
+      {selectedPhaseId && (
+        <ImportWeekExcelModal
+          open={weekImportOpen}
+          onClose={() => setWeekImportOpen(false)}
+          exercises={exercises}
+          phaseId={selectedPhaseId}
+          phaseName={selectedPhase?.name ?? 'Meso'}
+          splitDays={splitDays}
+          splitType={splitType}
+          weekNumber={selectedWeek}
+          onImported={handleWeekImported}
         />
       )}
 
