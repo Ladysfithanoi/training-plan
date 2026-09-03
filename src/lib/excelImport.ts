@@ -5,8 +5,8 @@
  * lazily by the callers so it never lands in the initial bundle.
  *
  *   • ImportScheduleExcelModal — one sheet → one training day of one week
- *   • ImportWeekExcelModal     — one workbook → every buổi tập of ONE week
- *   • ImportProgramExcelModal  → the whole meso (many weeks × many buổi)
+ *   • ImportPlanExcelModal     — one workbook → weeks × buổi tập, whatever the
+ *     file happens to describe (one week of many buổi, or a whole meso)
  *
  * Both accept the same messy real-world input: Vietnamese or English headers,
  * with or without accents, any capitalisation, "8-12" rep ranges or separate
@@ -38,8 +38,10 @@ export const COLUMN_ALIASES = {
   order:    ['stt', 'thu tu', 'order', 'order label', 'ma stt'],
   warmup:   ['khoi dong', 'bai khoi dong', 'warmup', 'warm up'],
   notes:    ['ghi chu', 'notes', 'note', 'luu y'],
-  /** Groups a week sheet's rows into training days (whole-program import). */
+  /** Groups a sheet's rows into training days (buổi tập). */
   day:      ['buoi', 'buoi tap', 'ten buoi', 'ngay', 'ngay tap', 'day', 'session', 'workout'],
+  /** Groups rows into weeks — lets ONE sheet carry a whole multi-week program. */
+  week:     ['tuan', 'tuan tap', 'tuan so', 'so tuan', 'week', 'week number', 'wk'],
 } as const
 
 /** Index of the first header matching any alias, or -1. */
@@ -103,6 +105,16 @@ export function parseWeekFromSheetName(name: string): number | null {
 }
 
 /**
+ * Week number carried by a CELL of a "Tuần" column: 2, "2", "Tuần 2", "W2".
+ * Same grammar as a sheet name, so both spellings of a week agree.
+ */
+export function parseWeekCell(raw: unknown): number | null {
+  const text = cellText(raw)
+  if (!text) return null
+  return parseWeekFromSheetName(text)
+}
+
+/**
  * Accent-folded copy of a string with the SAME length as the original, so a
  * regex match on the folded text can slice the original by index. (normalize()
  * alone shifts indices: "ầ" decomposes into two code points.)
@@ -134,6 +146,11 @@ export function parseSheetScope(name: string): { week: number | null; dayLabel: 
   const raw = String(name ?? '').trim()
   if (!raw) return { week: null, dayLabel: null }
 
+  // A default spreadsheet name states nothing at all. It must be caught first:
+  // "Sheet1" would otherwise read as week 1 (the "t1" inside it), and a stray
+  // week would drag the import onto a week the coach never asked for.
+  if (GENERIC_SHEET.test(foldChars(raw))) return { week: null, dayLabel: null }
+
   const match = foldChars(raw).match(WEEK_PREFIX)
   if (match) {
     const n = parseInt(match[1], 10)
@@ -148,7 +165,7 @@ export function parseSheetScope(name: string): { week: number | null; dayLabel: 
   const week = parseWeekFromSheetName(raw)
   if (week != null) return { week, dayLabel: null }
 
-  return { week: null, dayLabel: GENERIC_SHEET.test(foldChars(raw)) ? null : raw }
+  return { week: null, dayLabel: raw }
 }
 
 /**
@@ -188,4 +205,163 @@ export function inferSplitType(dayTypes: DayType[]): SplitType {
 /** Match key for a session label — accent/case/space insensitive. */
 export function dayLabelKey(label: string): string {
   return normalizeHeader(label)
+}
+
+// ─── Plan building (tuần × buổi) ──────────────────────────────────────────────
+
+/** A spreadsheet row, before weeks/buổi are resolved against the file's shape. */
+export interface RawRow {
+  name: string
+  sets: string
+  repMin: string
+  repMax: string
+  rir: string
+  orderLabel: string
+  isWarmup: boolean
+  notes: string
+  /** Value of the "Buổi tập" column (carried forward on blank cells). */
+  dayCell: string | null
+  /** Value of the "Tuần" column (carried forward on blank cells). */
+  weekCell: number | null
+}
+
+export interface ParsedSheet {
+  name: string
+  /** Week the sheet NAME states, if any. */
+  sheetWeek: number | null
+  /** Session the sheet NAME states, if any. */
+  sheetDayLabel: string | null
+  rows: RawRow[]
+}
+
+export interface PlanRow extends RawRow {
+  /** Session name this row ended up in. */
+  dayLabel: string
+  dayKey: string
+}
+
+export interface PlanWeek {
+  /** null = the file never said which week — the caller picks the target. */
+  week: number | null
+  /** Sheets that fed this week, for the preview tooltip. */
+  sheets: string[]
+  rows: PlanRow[]
+}
+
+export interface PlanDay {
+  key: string
+  /** Label as written in the file (or the meso's own label when matched). */
+  label: string
+  type: DayType
+  /** Existing SplitDay.id when matched, otherwise a fresh UUID. */
+  id: string
+  /** True when this session does not exist in the meso yet. */
+  isNew: boolean
+}
+
+export interface Plan {
+  weeks: PlanWeek[]
+  days: PlanDay[]
+  splitType: SplitType
+}
+
+/** How a file that says nothing about weeks should be read. */
+export type Reading = 'weeks' | 'sessions'
+
+/**
+ * Turn the sheets of a workbook into weeks × buổi tập under one reading of the
+ * file. A multi-sheet file with no week information is genuinely ambiguous —
+ * 3 sheets could be 3 buổi of one week or 3 weeks of one buổi — so the reading
+ * is an argument, not a guess made in here.
+ *
+ * Cheap and pure, so the UI can rebuild the whole plan the instant a coach
+ * flips that reading.
+ */
+export function buildPlan(
+  sheets: ParsedSheet[],
+  reading: Reading,
+  existingDays: { id: string; type: DayType; label: string }[],
+  fallbackDayLabel: string,
+): Plan {
+  // Week numbers already spoken for, so a sheet that names none never steals one.
+  const usedWeeks = new Set<number>()
+  if (reading === 'weeks') {
+    for (const sheet of sheets) {
+      if (sheet.sheetWeek != null) usedWeeks.add(sheet.sheetWeek)
+      for (const row of sheet.rows) if (row.weekCell != null) usedWeeks.add(row.weekCell)
+    }
+  }
+  let nextFreeWeek = 1
+  function claimWeek(): number {
+    while (usedWeeks.has(nextFreeWeek)) nextFreeWeek++
+    usedWeeks.add(nextFreeWeek)
+    return nextFreeWeek
+  }
+
+  const weeks: PlanWeek[] = []
+  const weekByNumber = new Map<number, PlanWeek>()
+  /** The "file never said which week" bucket — at most one. */
+  let unscoped: PlanWeek | null = null
+
+  sheets.forEach((sheet, sheetIdx) => {
+    // Under the "sessions" reading the whole file is one week, so a sheet is a
+    // buổi tập and never claims a week number.
+    const sheetWeek = reading === 'weeks' ? (sheet.sheetWeek ?? claimWeek()) : null
+
+    // Where this sheet's rows land when no "Buổi tập" cell says otherwise: the
+    // sheet's own name, else its position (several sheets = several buổi), else
+    // the buổi the coach has open — so a plain one-session file merges into it.
+    const sheetDayFallback = sheet.sheetDayLabel
+      ?? (reading === 'sessions' && sheets.length > 1 ? `Buổi ${sheetIdx + 1}` : fallbackDayLabel)
+
+    for (const row of sheet.rows) {
+      const week  = reading === 'weeks' ? (row.weekCell ?? sheetWeek) : null
+      const label = row.dayCell ?? sheetDayFallback
+
+      let bucket: PlanWeek
+      if (week == null) {
+        if (!unscoped) {
+          unscoped = { week: null, sheets: [], rows: [] }
+          weeks.push(unscoped)
+        }
+        bucket = unscoped
+      } else {
+        const found = weekByNumber.get(week)
+        if (found) {
+          bucket = found
+        } else {
+          bucket = { week, sheets: [], rows: [] }
+          weekByNumber.set(week, bucket)
+          weeks.push(bucket)
+        }
+      }
+
+      if (!bucket.sheets.includes(sheet.name)) bucket.sheets.push(sheet.name)
+      bucket.rows.push({ ...row, dayLabel: label, dayKey: dayLabelKey(label) })
+    }
+  })
+
+  weeks.sort((a, b) => (a.week ?? 0) - (b.week ?? 0))
+
+  // ── Resolve the day slots ──────────────────────────────────────────────────
+  // Order of first appearance across the weeks, so the split reads in the same
+  // order the coach wrote the file. A label the meso already has keeps that
+  // day's id — which is what pins the other weeks' exercises where they are.
+  const existingByKey = new Map(existingDays.map(d => [dayLabelKey(d.label), d]))
+  const days: PlanDay[] = []
+  const seenKeys = new Set<string>()
+
+  for (const week of weeks) {
+    for (const row of week.rows) {
+      if (seenKeys.has(row.dayKey)) continue
+      seenKeys.add(row.dayKey)
+      const existing = existingByKey.get(row.dayKey)
+      days.push(existing
+        ? { key: row.dayKey, label: existing.label, type: existing.type, id: existing.id, isNew: false }
+        : { key: row.dayKey, label: row.dayLabel, type: inferDayType(row.dayLabel), id: crypto.randomUUID(), isNew: true },
+      )
+    }
+  }
+
+  return { weeks, days, splitType: inferSplitType(days.map(d => d.type)) }
 }

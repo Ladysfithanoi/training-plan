@@ -1,34 +1,43 @@
 'use client'
 
 /**
- * ImportProgramExcelModal
- * ───────────────────────
- * Fills a WHOLE meso from one workbook: **each sheet is a training week**, and
- * a "Buổi tập" column inside a sheet splits its rows into training days.
+ * ImportPlanExcelModal
+ * ────────────────────
+ * ONE importer for everything a coach can have in a spreadsheet: many buổi tập,
+ * many tuần, or both at once. It replaces the two separate importers (one week
+ * at a time / one whole program at a time) — the coach picks a file and the
+ * modal works out what the file actually describes.
  *
- * A 4-sheet file therefore becomes 4 weeks in the app automatically — the coach
- * never has to click "Tùy chỉnh tuần này" four times and paste each session by
- * hand. Week numbers are read from the sheet names ("Tuần 1", "Week 1", "W1",
- * or plain "1"); a sheet whose name says nothing about a week falls back to its
- * position in the workbook.
+ * How a file is read
+ * ──────────────────
+ *   • Weeks come from the sheet names ("Tuần 1", "Week 2", "W3"), or from a
+ *     "Tuần" COLUMN, so a whole 4-week program can live in a single sheet.
+ *   • Buổi tập come from a "Buổi tập" COLUMN, or from the sheet name when the
+ *     sheet is one session ("Đẩy (Push)", "Tuần 2 - Đẩy").
+ *   • Sheets that name the same week are merged, so one week can be spread over
+ *     several sheets — one per buổi.
  *
- * A week may also be SPREAD OVER SEVERAL SHEETS, one per buổi tập, by naming
- * them "Tuần 1 - Đẩy", "Tuần 1 - Kéo", … — sheets that name the same week are
- * merged, and the part after the week becomes the session label. That is the
- * other natural way to lay out a program, and it needs no "Buổi tập" column.
+ * What it writes
+ * ──────────────
+ *   • File covering SEVERAL weeks → the whole meso (POST /import-program):
+ *     every week in the file becomes a week of the giáo án.
+ *   • File covering ONE week → that week only (POST /import-week): the target
+ *     week is the one named in the file, otherwise the week tab the coach is
+ *     on, and it stays changeable in the modal. No other week is touched.
  *
- * Day slots are matched against the meso's existing buổi tập by label (accent /
- * case insensitive), so re-importing an updated file keeps every exercise pinned
- * where it already was. Unknown session names become brand-new day slots.
+ * When a multi-sheet file says nothing about weeks the shape is genuinely
+ * ambiguous — 3 sheets could be 3 buổi of one week or 3 weeks of one buổi. The
+ * modal then shows both readings and lets the coach flip between them, rather
+ * than guessing silently.
  *
- * Exercise names behave exactly like the single-day importer:
+ * Session names are matched against the meso's existing buổi tập by label
+ * (accent / case insensitive), so re-importing an updated file keeps every
+ * exercise pinned where it already was. Unknown names become new day slots.
+ *
+ * Exercise names behave exactly like the per-buổi importer:
  *   • already in Kho bài tập → reused as-is, nothing about it is touched
  *   • not in the library     → created with ONLY its name, for the coach to
  *     complete in Thư viện afterwards
- *
- * Storage (migration 011): week W's rows are written with week_number = W, and
- * the first imported week is duplicated into the base (Gốc) scope so a meso
- * longer than the file still resolves to a sensible program.
  */
 
 import { useMemo, useRef, useState } from 'react'
@@ -36,64 +45,37 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import {
   COLUMN_ALIASES,
+  buildPlan,
   cellText,
   dayLabelKey,
-  inferDayType,
-  inferSplitType,
   normalizeHeader,
   parseBool,
   parseSheetScope,
+  parseWeekCell,
   resolveColumn,
   splitRepRange,
 } from '@/lib/excelImport'
+import type { ParsedSheet, PlanRow, RawRow, Reading } from '@/lib/excelImport'
 import { DAY_TYPE_LABELS } from '@/lib/trainingSplit'
-import type { DayType, SplitDay, SplitType } from '@/lib/trainingSplit'
+import type { SplitDay, SplitType } from '@/lib/trainingSplit'
 import { cn } from '@/lib/utils'
 import type { Exercise, Phase, PhaseExercise } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ProgramRow {
-  name: string
-  sets: string
-  repMin: string
-  repMax: string
-  rir: string
-  orderLabel: string
-  isWarmup: boolean
-  notes: string
-  /** Session name exactly as written in the sheet. */
-  dayLabel: string
-  /** dayLabelKey(dayLabel) — links the row to a ParsedDay. */
-  dayKey: string
-}
-
-interface ParsedWeek {
-  week: number
-  sheetName: string
-  rows: ProgramRow[]
-}
-
-interface ParsedDay {
-  key: string
-  /** Label as written in the sheet (or the meso's own label when matched). */
-  label: string
-  type: DayType
-  /** Existing SplitDay.id when matched, otherwise a fresh UUID. */
-  id: string
-  /** True when this session does not exist in the meso yet. */
-  isNew: boolean
-}
-
 interface Parsed {
-  weeks: ParsedWeek[]
-  days: ParsedDay[]
-  splitType: SplitType
+  sheets: ParsedSheet[]
   /** Sheets that carried no usable rows, reported so nothing looks lost. */
   skipped: string[]
-  /** True when nothing in the file distinguished buổi tập — all rows became one. */
-  singleDayFallback: boolean
+  /** True when a sheet name or a "Tuần" column stated a week. */
+  hasWeekInfo: boolean
+  /** True when a "Buổi tập" column stated a session. */
+  hasDayColumn: boolean
+  /** Multi-sheet file with no week info: could be weeks OR buổi — coach decides. */
+  ambiguous: boolean
 }
+
+// ─── Results ──────────────────────────────────────────────────────────────────
 
 export interface ProgramImportResult {
   added: number
@@ -105,6 +87,23 @@ export interface ProgramImportResult {
   splitDays: SplitDay[]
 }
 
+export interface WeekImportResult {
+  added: number
+  week: number | null
+  createdExercises: { id: string; name: string }[]
+  phase: Phase | null
+  exercises: (PhaseExercise & { exercise: Exercise })[]
+  splitType: SplitType
+  splitDays: SplitDay[]
+  /** How many buổi tập the file actually wrote into. */
+  dayCount: number
+}
+
+/** Which of the two writes happened — the builder reacts differently to each. */
+export type PlanImportResult =
+  | ({ kind: 'program' } & ProgramImportResult)
+  | ({ kind: 'week' }    & WeekImportResult)
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -114,9 +113,15 @@ interface Props {
   phaseName: string
   /** The meso's current day slots — imported sessions are matched against these. */
   splitDays: SplitDay[]
-  /** The meso's configured length, shown next to the sheet count. */
+  /** The meso's split type; kept as-is when it already has one. */
+  splitType: SplitType | null
+  /** The meso's configured length — the week tabs the coach can target. */
   durationWeeks: number
-  onImported: (result: ProgramImportResult) => void
+  /** Week tab the coach is on: null = Gốc. Default target for a one-week file. */
+  selectedWeek: number | null
+  /** Buổi tập currently open — where rows land when the file names no session. */
+  activeDayLabel: string | null
+  onImported: (result: PlanImportResult) => void
 }
 
 // ─── Template ─────────────────────────────────────────────────────────────────
@@ -145,8 +150,9 @@ const TEMPLATE_WEEKS = 4
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ImportProgramExcelModal({
-  open, onClose, exercises, phaseId, phaseName, splitDays, durationWeeks, onImported,
+export function ImportPlanExcelModal({
+  open, onClose, exercises, phaseId, phaseName, splitDays, splitType,
+  durationWeeks, selectedWeek, activeDayLabel, onImported,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -155,13 +161,38 @@ export function ImportProgramExcelModal({
   const [parseError, setParseError] = useState<string | null>(null)
   const [previewWeek, setPreviewWeek] = useState(0)
 
-  const [mode, setMode]                 = useState<'replace' | 'append'>('replace')
-  const [syncDuration, setSyncDuration] = useState(true)
+  /** Only meaningful for an ambiguous file; null = use the automatic reading. */
+  const [readingOverride, setReadingOverride] = useState<Reading | null>(null)
+  /** Target week for a one-week file; undefined = the automatic target. */
+  const [targetOverride, setTargetOverride]   = useState<number | null | undefined>(undefined)
+
+  const [mode, setMode]                   = useState<'replace' | 'append'>('replace')
+  const [syncDuration, setSyncDuration]   = useState(true)
   const [syncFrequency, setSyncFrequency] = useState(true)
 
-  const [importing, setImporting]   = useState(false)
+  const [importing, setImporting]     = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
-  const [done, setDone]             = useState<ProgramImportResult | null>(null)
+  const [done, setDone]               = useState<PlanImportResult | null>(null)
+
+  const fallbackDayLabel = activeDayLabel ?? splitDays[0]?.label ?? 'Buổi 1'
+
+  const reading: Reading = readingOverride
+    ?? (parsed?.hasWeekInfo ? 'weeks' : 'sessions')
+
+  const plan = useMemo(
+    () => parsed ? buildPlan(parsed.sheets, reading, splitDays, fallbackDayLabel) : null,
+    [parsed, reading, splitDays, fallbackDayLabel],
+  )
+
+  /** More than one week in the file → the whole meso is rewritten. */
+  const isProgram = (plan?.weeks.length ?? 0) > 1
+
+  /** Where a ONE-week file lands: what the file said, else the open week tab. */
+  const targetWeek: number | null = targetOverride !== undefined
+    ? targetOverride
+    : (plan?.weeks[0]?.week ?? selectedWeek)
+
+  const scopeLabel = targetWeek == null ? 'bộ Gốc' : `Tuần ${targetWeek}`
 
   /** Lowercase library names — drives the "bài tập mới" count. */
   const libraryNames = useMemo(
@@ -169,19 +200,26 @@ export function ImportProgramExcelModal({
     [exercises],
   )
 
-  const totalRows = parsed?.weeks.reduce((n, w) => n + w.rows.length, 0) ?? 0
+  const totalRows = plan?.weeks.reduce((n, w) => n + w.rows.length, 0) ?? 0
 
   const newNames = useMemo(() => {
-    if (!parsed) return [] as string[]
+    if (!plan) return [] as string[]
     const out = new Set<string>()
-    for (const week of parsed.weeks) {
+    for (const week of plan.weeks) {
       for (const row of week.rows) {
         const key = row.name.trim().toLowerCase()
         if (key && !libraryNames.has(key)) out.add(row.name.trim())
       }
     }
     return [...out]
-  }, [parsed, libraryNames])
+  }, [plan, libraryNames])
+
+  /** Sessions the meso has but a one-week file never mentions — emptied by "replace". */
+  const untouchedDays = useMemo(() => {
+    if (!plan || isProgram) return [] as SplitDay[]
+    const keys = new Set(plan.days.map(d => d.key))
+    return splitDays.filter(d => !keys.has(dayLabelKey(d.label)))
+  }, [plan, isProgram, splitDays])
 
   function reset() {
     setParsed(null)
@@ -190,6 +228,8 @@ export function ImportProgramExcelModal({
     setImportError(null)
     setDone(null)
     setPreviewWeek(0)
+    setReadingOverride(null)
+    setTargetOverride(undefined)
   }
 
   function handleClose() {
@@ -197,8 +237,16 @@ export function ImportProgramExcelModal({
     onClose()
   }
 
+  /** Flipping the reading re-groups everything, so the picks derived from it go. */
+  function changeReading(next: Reading) {
+    setReadingOverride(next)
+    setTargetOverride(undefined)
+    setPreviewWeek(0)
+  }
+
   // ── Template download ──────────────────────────────────────────────────────
-  // One sheet per week, named "Tuần N" — the exact shape this modal reads back.
+  // One sheet per week, named "Tuần N", each with a "Buổi tập" column — the
+  // shape that exercises both dimensions at once.
   async function downloadTemplate() {
     const xlsx = await import('xlsx')
     const book = xlsx.utils.book_new()
@@ -210,10 +258,13 @@ export function ImportProgramExcelModal({
       ]
       xlsx.utils.book_append_sheet(book, sheet, `Tuần ${w}`)
     }
-    xlsx.writeFile(book, 'mau-chuong-trinh-nhieu-tuan.xlsx')
+    xlsx.writeFile(book, 'mau-chuong-trinh-tuan-va-buoi.xlsx')
   }
 
   // ── Parse ──────────────────────────────────────────────────────────────────
+  // Reading the file only collects rows + what each sheet NAME says; how those
+  // rows group into weeks and buổi is decided later by buildPlan, so the coach
+  // can flip an ambiguous file without re-picking it.
   async function handleFile(file: File) {
     reset()
     setFileName(file.name)
@@ -228,40 +279,22 @@ export function ImportProgramExcelModal({
         return
       }
 
-      const weeks: ParsedWeek[] = []
-      const skipped: string[]   = []
-      /** Week numbers already claimed, so two sheets never collide. */
-      const usedWeeks = new Set<number>()
-      let sawDayColumn = false
+      const sheets: ParsedSheet[] = []
+      const skipped: string[]     = []
+      let hasWeekColumn = false
+      let hasDayColumn  = false
 
-      // First pass: honour every sheet name that explicitly states its week, so
-      // a workbook ordered 3,1,2 still lands on the right weeks. A name may also
-      // carry the session ("Tuần 2 - Đẩy"), which is how one week can span
-      // several sheets — one per buổi tập.
-      const sheetScopes = workbook.SheetNames.map(parseSheetScope)
-      for (const scope of sheetScopes) {
-        if (scope.week != null) usedWeeks.add(scope.week)
-      }
-      /** Next free week number for a sheet that didn't name one. */
-      let nextFreeWeek = 1
-      function claimWeek(): number {
-        while (usedWeeks.has(nextFreeWeek)) nextFreeWeek++
-        usedWeeks.add(nextFreeWeek)
-        return nextFreeWeek
-      }
-      /** week number → its entry in `weeks`, so sheets of one week merge. */
-      const weekByNumber = new Map<number, ParsedWeek>()
-
-      workbook.SheetNames.forEach((sheetName, sheetIdx) => {
+      for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName]
         const raw   = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as unknown[][]
 
-        if (raw.length < 2) { skipped.push(sheetName); return }
+        if (raw.length < 2) { skipped.push(sheetName); continue }
 
         const headers = (raw[0] ?? []).map(normalizeHeader)
         const nameIdx = resolveColumn(headers, COLUMN_ALIASES.name)
-        if (nameIdx === -1) { skipped.push(sheetName); return }
+        if (nameIdx === -1) { skipped.push(sheetName); continue }
 
+        const weekIdx   = resolveColumn(headers, COLUMN_ALIASES.week)
         const dayIdx    = resolveColumn(headers, COLUMN_ALIASES.day)
         const setsIdx   = resolveColumn(headers, COLUMN_ALIASES.sets)
         const repsIdx   = resolveColumn(headers, COLUMN_ALIASES.reps)
@@ -272,24 +305,23 @@ export function ImportProgramExcelModal({
         const warmupIdx = resolveColumn(headers, COLUMN_ALIASES.warmup)
         const notesIdx  = resolveColumn(headers, COLUMN_ALIASES.notes)
 
-        if (dayIdx !== -1) sawDayColumn = true
+        const scope = parseSheetScope(sheetName)
+        const rows: RawRow[] = []
 
-        // No "Buổi tập" column → the whole sheet is one session, named by the
-        // sheet itself ("Tuần 2 - Đẩy" → "Đẩy"). A sheet that names no session
-        // reuses the meso's first day label so the import merges into it instead
-        // of adding a duplicate session next to it.
-        const fallbackLabel = sheetScopes[sheetIdx].dayLabel ?? splitDays[0]?.label ?? 'Buổi 1'
-
-        const rows: ProgramRow[] = []
-        /** Last non-empty day cell — lets a sheet leave it blank on repeat rows. */
-        let currentLabel = fallbackLabel
+        /** Last non-empty cell — lets a sheet leave them blank on repeat rows. */
+        let currentDay:  string | null = null
+        let currentWeek: number | null = null
 
         for (let i = 1; i < raw.length; i++) {
           const row = raw[i] ?? []
 
           if (dayIdx !== -1) {
             const cell = cellText(row[dayIdx])
-            if (cell) currentLabel = cell
+            if (cell) { currentDay = cell; hasDayColumn = true }
+          }
+          if (weekIdx !== -1) {
+            const cell = parseWeekCell(row[weekIdx])
+            if (cell != null) { currentWeek = cell; hasWeekColumn = true }
           }
 
           const name = cellText(row[nameIdx])
@@ -312,67 +344,36 @@ export function ImportProgramExcelModal({
             orderLabel: orderIdx  !== -1 ? cellText(row[orderIdx]).toUpperCase() : '',
             isWarmup:   warmupIdx !== -1 ? parseBool(row[warmupIdx]) : false,
             notes:      notesIdx  !== -1 ? cellText(row[notesIdx]) : '',
-            dayLabel:   currentLabel,
-            dayKey:     dayLabelKey(currentLabel),
+            dayCell:    currentDay,
+            weekCell:   currentWeek,
           })
         }
 
-        if (rows.length === 0) { skipped.push(sheetName); return }
+        if (rows.length === 0) { skipped.push(sheetName); continue }
 
-        // Sheets that name the same week belong to the same week: "Tuần 1 - Đẩy"
-        // and "Tuần 1 - Kéo" are two buổi tập of week 1, not two weeks. Only a
-        // sheet that names no week at all claims the next free one.
-        const named   = sheetScopes[sheetIdx].week
-        const week    = named ?? claimWeek()
-        const already = weekByNumber.get(week)
+        sheets.push({
+          name:          sheetName,
+          sheetWeek:     scope.week,
+          sheetDayLabel: scope.dayLabel,
+          rows,
+        })
+      }
 
-        if (already) {
-          already.rows.push(...rows)
-          already.sheetName = `${already.sheetName}, ${sheetName}`
-        } else {
-          const entry: ParsedWeek = { week, sheetName, rows }
-          weekByNumber.set(week, entry)
-          weeks.push(entry)
-        }
-      })
-
-      if (weeks.length === 0) {
+      if (sheets.length === 0) {
         setParseError(
           'Không sheet nào có cột "Tên bài tập" kèm dữ liệu. Hàng đầu tiên của mỗi sheet phải là tiêu đề cột — tải file mẫu để xem đúng định dạng.',
         )
         return
       }
 
-      weeks.sort((a, b) => a.week - b.week)
-
-      // ── Resolve the day slots ────────────────────────────────────────────────
-      // Order of first appearance across the weeks, so the split reads in the
-      // same order the coach wrote the sheet.
-      const existingByKey = new Map(splitDays.map(d => [dayLabelKey(d.label), d]))
-      const days: ParsedDay[] = []
-      const seenKeys = new Set<string>()
-
-      for (const week of weeks) {
-        for (const row of week.rows) {
-          if (seenKeys.has(row.dayKey)) continue
-          seenKeys.add(row.dayKey)
-
-          const existing = existingByKey.get(row.dayKey)
-          // A matched day keeps the meso's own label (its exercises stay pinned);
-          // a new one keeps the label exactly as typed in the sheet.
-          days.push(existing
-            ? { key: row.dayKey, label: existing.label, type: existing.type as DayType, id: existing.id, isNew: false }
-            : { key: row.dayKey, label: row.dayLabel, type: inferDayType(row.dayLabel), id: crypto.randomUUID(), isNew: true },
-          )
-        }
-      }
+      const hasWeekInfo = hasWeekColumn || sheets.some(s => s.sheetWeek != null)
 
       setParsed({
-        weeks,
-        days,
-        splitType: inferSplitType(days.map(d => d.type)),
+        sheets,
         skipped,
-        singleDayFallback: !sawDayColumn && days.length === 1,
+        hasWeekInfo,
+        hasDayColumn,
+        ambiguous: !hasWeekInfo && sheets.length > 1,
       })
       setPreviewWeek(0)
     } catch (err) {
@@ -381,55 +382,104 @@ export function ImportProgramExcelModal({
   }
 
   // ── Import ─────────────────────────────────────────────────────────────────
+  function rowPayload(row: PlanRow, dayId: string) {
+    return {
+      day_id:         dayId,
+      name:           row.name.trim(),
+      target_sets:    row.sets   ? parseInt(row.sets, 10)   : 3,
+      target_rep_min: row.repMin ? parseInt(row.repMin, 10) : 8,
+      target_rep_max: row.repMax ? parseInt(row.repMax, 10) : 12,
+      rir_target:     row.rir    ? parseInt(row.rir, 10)    : 2,
+      order_label:    row.orderLabel || null,
+      is_warmup:      row.isWarmup,
+      notes:          row.notes || null,
+    }
+  }
+
   async function handleImport() {
-    if (!parsed) return
+    if (!plan) return
     setImporting(true)
     setImportError(null)
 
-    const idByKey = new Map(parsed.days.map(d => [d.key, d.id]))
+    const idByKey = new Map(plan.days.map(d => [d.key, d.id]))
+    const resolvedSplitType = splitType ?? plan.splitType
 
     try {
-      const res = await fetch(`/api/phases/${phaseId}/import-program`, {
+      if (isProgram) {
+        // ── Whole meso: every week of the file becomes a week of the giáo án ──
+        const res = await fetch(`/api/phases/${phaseId}/import-program`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode,
+            split_type:    plan.splitType,
+            split_days:    plan.days.map(d => ({ id: d.id, type: d.type, label: d.label })),
+            base_week:     plan.weeks[0].week,
+            set_duration:  syncDuration,
+            set_frequency: syncFrequency,
+            weeks: plan.weeks.map(w => ({
+              week: w.week,
+              rows: w.rows.map(r => rowPayload(r, idByKey.get(r.dayKey) ?? plan.days[0].id)),
+            })),
+          }),
+        })
+
+        const data = await res.json()
+        if (!res.ok) { setImportError(data.error ?? 'Nhập thất bại'); return }
+
+        const result: PlanImportResult = {
+          kind:             'program',
+          added:            data.added ?? 0,
+          weeks:            data.weeks ?? [],
+          createdExercises: data.created_exercises ?? [],
+          phase:            data.phase ?? null,
+          exercises:        data.exercises ?? [],
+          splitType:        plan.splitType,
+          splitDays:        plan.days.map(d => ({ id: d.id, type: d.type, label: d.label })),
+        }
+        setDone(result)
+        onImported(result)
+        return
+      }
+
+      // ── One week: only that week's rows are rewritten ─────────────────────
+      // The endpoint rewrites phases.split_days wholesale, so send the meso's
+      // existing days FIRST and only append the ones the file introduces — a
+      // buổi the file never mentions must keep its slot (and its exercises in
+      // every other week).
+      const existingIds = new Set(splitDays.map(d => d.id))
+      const allDays: SplitDay[] = [
+        ...splitDays,
+        ...plan.days
+          .filter(d => !existingIds.has(d.id))
+          .map(d => ({ id: d.id, type: d.type, label: d.label })),
+      ]
+
+      const res = await fetch(`/api/phases/${phaseId}/import-week`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode,
-          split_type:    parsed.splitType,
-          split_days:    parsed.days.map(d => ({ id: d.id, type: d.type, label: d.label })),
-          base_week:     parsed.weeks[0].week,
-          set_duration:  syncDuration,
-          set_frequency: syncFrequency,
-          weeks: parsed.weeks.map(w => ({
-            week: w.week,
-            rows: w.rows.map(r => ({
-              day_id:         idByKey.get(r.dayKey) ?? null,
-              name:           r.name.trim(),
-              target_sets:    r.sets   ? parseInt(r.sets, 10)   : 3,
-              target_rep_min: r.repMin ? parseInt(r.repMin, 10) : 8,
-              target_rep_max: r.repMax ? parseInt(r.repMax, 10) : 12,
-              rir_target:     r.rir    ? parseInt(r.rir, 10)    : 2,
-              order_label:    r.orderLabel || null,
-              is_warmup:      r.isWarmup,
-              notes:          r.notes || null,
-            })),
-          })),
+          week_number: targetWeek,
+          split_type:  resolvedSplitType,
+          split_days:  allDays.map(d => ({ id: d.id, type: d.type, label: d.label })),
+          rows: (plan.weeks[0]?.rows ?? []).map(r => rowPayload(r, idByKey.get(r.dayKey) ?? allDays[0].id)),
         }),
       })
 
       const data = await res.json()
-      if (!res.ok) {
-        setImportError(data.error ?? 'Nhập thất bại')
-        return
-      }
+      if (!res.ok) { setImportError(data.error ?? 'Nhập thất bại'); return }
 
-      const result: ProgramImportResult = {
+      const result: PlanImportResult = {
+        kind:             'week',
         added:            data.added ?? 0,
-        weeks:            data.weeks ?? [],
+        week:             targetWeek,
         createdExercises: data.created_exercises ?? [],
         phase:            data.phase ?? null,
         exercises:        data.exercises ?? [],
-        splitType:        parsed.splitType,
-        splitDays:        parsed.days.map(d => ({ id: d.id, type: d.type, label: d.label })),
+        splitType:        resolvedSplitType,
+        splitDays:        allDays,
+        dayCount:         plan.days.length,
       }
       setDone(result)
       onImported(result)
@@ -441,13 +491,14 @@ export function ImportProgramExcelModal({
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const activeWeek = parsed?.weeks[previewWeek] ?? null
+  const activeWeek = plan?.weeks[previewWeek] ?? null
+  const weekOptions: (number | null)[] = [null, ...Array.from({ length: durationWeeks }, (_, i) => i + 1)]
 
   return (
     <Modal
       open={open}
       onClose={handleClose}
-      title="Nhập cả chương trình nhiều tuần từ Excel"
+      title="Nhập giáo án từ Excel"
       size="lg"
     >
       {done ? (
@@ -457,10 +508,15 @@ export function ImportProgramExcelModal({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <p className="text-lg font-bold text-ink">Đã tạo xong chương trình</p>
+          <p className="text-lg font-bold text-ink">
+            {done.kind === 'program' ? 'Đã tạo xong chương trình' : `Đã nhập xong ${scopeLabel}`}
+          </p>
           <p className="text-sm text-ink/55">
-            {done.weeks.length} tuần · {done.splitDays.length} buổi/tuần · {done.added} dòng bài tập
-            đã được ghi vào <span className="font-semibold text-ink/75">{phaseName}</span>.
+            {done.kind === 'program'
+              ? <>{done.weeks.length} tuần · {done.splitDays.length} buổi/tuần · {done.added} dòng bài tập</>
+              : <>{done.dayCount} buổi tập · {done.added} dòng bài tập</>}
+            {' '}đã được ghi vào <span className="font-semibold text-ink/75">{phaseName}</span>
+            {done.kind === 'week' && done.week != null && ' — các tuần khác giữ nguyên'}.
           </p>
           {done.createdExercises.length > 0 && (
             <div className="mx-auto max-w-md rounded-xl border border-amber/25 bg-amber/6 px-4 py-3 text-left">
@@ -483,13 +539,13 @@ export function ImportProgramExcelModal({
 
           {/* ── How it works ───────────────────────────────────────────────── */}
           <div className="rounded-xl border border-ink/10 bg-ink/3 px-4 py-3 text-xs text-ink/60 leading-relaxed">
-            <span className="font-semibold text-ink">Mỗi sheet = một tuần tập.</span>{' '}
-            Tên sheet (&ldquo;Tuần 1&rdquo;, &ldquo;Week 2&rdquo;, &ldquo;W3&rdquo;) quyết định số tuần;
-            cột <span className="font-semibold text-ink/75">Buổi tập</span> trong sheet chia các dòng
-            thành từng buổi. Hoặc tách mỗi buổi ra một sheet riêng —{' '}
-            <span className="font-semibold text-ink/75">&ldquo;Tuần 1 - Đẩy&rdquo;</span>,{' '}
-            &ldquo;Tuần 1 - Kéo&rdquo; — các sheet cùng tuần sẽ được gộp lại. Toàn bộ sẽ được ghi vào giáo án{' '}
-            <span className="font-semibold text-ink">{phaseName}</span>.
+            <span className="font-semibold text-ink">Một tệp cho cả tuần lẫn buổi.</span>{' '}
+            Tuần lấy từ tên sheet (&ldquo;Tuần 1&rdquo;, &ldquo;Week 2&rdquo;) hoặc cột{' '}
+            <span className="font-semibold text-ink/75">Tuần</span>; buổi lấy từ cột{' '}
+            <span className="font-semibold text-ink/75">Buổi tập</span> hoặc từ tên sheet
+            (&ldquo;Tuần 1 - Đẩy&rdquo;, &ldquo;Kéo (Pull)&rdquo;). Tệp nhiều tuần sẽ ghi cả giáo án{' '}
+            <span className="font-semibold text-ink">{phaseName}</span>; tệp một tuần chỉ ghi vào đúng
+            tuần đó.
           </div>
 
           {/* ── Drop zone ──────────────────────────────────────────────────── */}
@@ -510,7 +566,7 @@ export function ImportProgramExcelModal({
             <p className="text-sm font-medium text-ink/60">
               {fileName ?? 'Kéo thả hoặc nhấn để chọn tệp'}
             </p>
-            <p className="text-xs text-ink/35 mt-1">.xlsx, .xls — mỗi sheet là một tuần</p>
+            <p className="text-xs text-ink/35 mt-1">.xlsx, .xls — một tuần hay nhiều tuần đều được</p>
             <input
               ref={fileRef}
               type="file"
@@ -532,6 +588,7 @@ export function ImportProgramExcelModal({
             </div>
             <p className="text-[11px] text-ink/55 leading-relaxed">
               Cột nhận dạng được (không phân biệt hoa/thường, có dấu hay không):{' '}
+              <span className="font-medium text-ink/70">Tuần</span>,{' '}
               <span className="font-medium text-ink/70">Buổi tập</span>,{' '}
               <span className="font-medium text-ink/70">Tên bài tập</span> (bắt buộc), Số hiệp,
               Reps (&ldquo;8-12&rdquo;) hoặc Rep min / Rep max, RIR, STT, Khởi động, Ghi chú.
@@ -546,14 +603,48 @@ export function ImportProgramExcelModal({
           {parseError && <p className="text-sm text-danger">{parseError}</p>}
 
           {/* ── Preview ────────────────────────────────────────────────────── */}
-          {parsed && (
+          {parsed && plan && (
             <div className="space-y-4">
+
+              {/* Ambiguous file: the coach says what the sheets mean */}
+              {parsed.ambiguous && (
+                <div className="rounded-xl border border-amber/30 bg-amber/6 px-4 py-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber">
+                    Tệp có {parsed.sheets.length} sheet nhưng không ghi tuần — mỗi sheet là gì?
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {([
+                      { value: 'sessions' as const, title: 'Mỗi sheet là một BUỔI', desc: `Cả tệp là một tuần với ${parsed.sheets.length} buổi tập.` },
+                      { value: 'weeks'    as const, title: 'Mỗi sheet là một TUẦN', desc: `Cả tệp là ${parsed.sheets.length} tuần tập.` },
+                    ]).map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => changeReading(opt.value)}
+                        className={cn(
+                          'rounded-xl border px-3 py-2.5 text-left transition-all bg-white',
+                          reading === opt.value ? 'border-amber bg-amber/8' : 'border-ink/12 hover:border-ink/30',
+                        )}
+                      >
+                        <p className={cn('text-xs font-semibold', reading === opt.value ? 'text-amber' : 'text-ink')}>
+                          {opt.title}
+                        </p>
+                        <p className="text-[11px] text-ink/50 leading-relaxed mt-0.5">{opt.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-ink/45 leading-relaxed">
+                    Mẹo: đặt tên sheet kiểu &ldquo;Tuần 1&rdquo; / &ldquo;Tuần 1 - Đẩy&rdquo;, hoặc thêm
+                    cột <span className="font-medium">Tuần</span>, thì lần sau app tự hiểu.
+                  </p>
+                </div>
+              )}
 
               {/* Summary tiles */}
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: 'Tuần', value: parsed.weeks.length },
-                  { label: 'Buổi / tuần', value: parsed.days.length },
+                  { label: 'Tuần', value: isProgram ? plan.weeks.length : (targetWeek == null ? 'Gốc' : targetWeek) },
+                  { label: isProgram ? 'Buổi / tuần' : 'Buổi tập', value: plan.days.length },
                   { label: 'Dòng bài tập', value: totalRows },
                 ].map(tile => (
                   <div key={tile.label} className="rounded-xl border border-ink/10 bg-white px-3 py-2.5 text-center">
@@ -563,13 +654,13 @@ export function ImportProgramExcelModal({
                 ))}
               </div>
 
-              {/* Day slots resolved from the sheet */}
+              {/* Day slots resolved from the file */}
               <div className="rounded-xl border border-ink/10 bg-white px-4 py-3 space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-ink/40">
                   Buổi tập trong tệp
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {parsed.days.map(d => (
+                  {plan.days.map(d => (
                     <span
                       key={d.id}
                       className={cn(
@@ -589,36 +680,38 @@ export function ImportProgramExcelModal({
                     </span>
                   ))}
                 </div>
-                {parsed.singleDayFallback && (
+                {plan.days.length === 1 && !parsed.hasDayColumn && (
                   <p className="text-[11px] text-ink/45 leading-relaxed">
-                    Mỗi tuần trong tệp chỉ có một buổi. Muốn nhiều buổi mỗi tuần: thêm cột{' '}
+                    Tệp chỉ có một buổi. Muốn nhiều buổi: thêm cột{' '}
                     <span className="font-medium">Buổi tập</span>, hoặc tách mỗi buổi thành một sheet
-                    đặt tên kiểu <span className="font-medium">&ldquo;Tuần 1 - Đẩy&rdquo;</span>.
+                    riêng đặt tên theo buổi.
                   </p>
                 )}
               </div>
 
               {/* Week preview */}
               <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5">
-                  {parsed.weeks.map((w, i) => (
-                    <button
-                      key={w.week}
-                      type="button"
-                      onClick={() => setPreviewWeek(i)}
-                      className={cn(
-                        'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all',
-                        i === previewWeek
-                          ? 'border-amber bg-amber/10 text-amber'
-                          : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
-                      )}
-                      title={`Sheet “${w.sheetName}”`}
-                    >
-                      Tuần {w.week}
-                      <span className="ml-1.5 font-normal text-ink/35">{w.rows.length}</span>
-                    </button>
-                  ))}
-                </div>
+                {plan.weeks.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {plan.weeks.map((w, i) => (
+                      <button
+                        key={w.week ?? 'auto'}
+                        type="button"
+                        onClick={() => setPreviewWeek(i)}
+                        className={cn(
+                          'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all',
+                          i === previewWeek
+                            ? 'border-amber bg-amber/10 text-amber'
+                            : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
+                        )}
+                        title={`Sheet “${w.sheets.join(', ')}”`}
+                      >
+                        Tuần {w.week}
+                        <span className="ml-1.5 font-normal text-ink/35">{w.rows.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {activeWeek && (
                   <div className="overflow-auto max-h-64 rounded-xl border border-ink/8 bg-white">
@@ -634,7 +727,7 @@ export function ImportProgramExcelModal({
                       </thead>
                       <tbody className="divide-y divide-ink/5">
                         {activeWeek.rows.map((row, i) => {
-                          const day   = parsed.days.find(d => d.key === row.dayKey)
+                          const day   = plan.days.find(d => d.key === row.dayKey)
                           const isNew = !!row.name.trim() && !libraryNames.has(row.name.trim().toLowerCase())
                           return (
                             <tr key={i} className="hover:bg-ink/2">
@@ -677,13 +770,48 @@ export function ImportProgramExcelModal({
               {/* ── Options ─────────────────────────────────────────────────── */}
               <div className="rounded-xl border border-ink/10 bg-white px-4 py-3 space-y-3">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-ink/40">
-                  Cách ghi vào giáo án
+                  {isProgram ? 'Cách ghi vào giáo án' : `Cách ghi vào ${scopeLabel}`}
                 </p>
+
+                {/* One-week file → the coach picks which week it fills. */}
+                {!isProgram && (
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] text-ink/55">Ghi vào tuần</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {weekOptions.map(w => (
+                        <button
+                          key={w ?? 'base'}
+                          type="button"
+                          onClick={() => setTargetOverride(w)}
+                          className={cn(
+                            'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all',
+                            targetWeek === w
+                              ? 'border-amber bg-amber/10 text-amber'
+                              : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
+                          )}
+                        >
+                          {w == null ? 'Gốc' : `Tuần ${w}`}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-ink/40 leading-relaxed">
+                      {targetWeek == null
+                        ? 'Bộ Gốc áp dụng cho mọi tuần chưa có bản riêng.'
+                        : `Chỉ Tuần ${targetWeek} thay đổi — các tuần khác giữ nguyên.`}
+                    </p>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {([
-                    { value: 'replace' as const, title: 'Thay thế toàn bộ', desc: 'Xoá hết bài tập đang có trong Meso rồi ghi mới theo tệp.' },
-                    { value: 'append'  as const, title: 'Thêm vào',          desc: 'Giữ nguyên bài tập cũ, nối tiếp bài tập từ tệp.' },
+                    {
+                      value: 'replace' as const,
+                      title: isProgram ? 'Thay thế toàn bộ' : `Thay thế ${scopeLabel}`,
+                      desc:  isProgram
+                        ? 'Xoá hết bài tập đang có trong Meso rồi ghi mới theo tệp.'
+                        : `Xoá bài tập đang có của ${scopeLabel} rồi ghi mới theo tệp.`,
+                    },
+                    { value: 'append' as const, title: 'Thêm vào', desc: 'Giữ nguyên bài tập cũ, nối tiếp bài tập từ tệp.' },
                   ]).map(opt => (
                     <button
                       key={opt.value}
@@ -704,34 +832,45 @@ export function ImportProgramExcelModal({
                   ))}
                 </div>
 
-                <label className="flex items-start gap-2 text-xs text-ink/65 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={syncDuration}
-                    onChange={e => setSyncDuration(e.target.checked)}
-                    className="accent-amber mt-0.5"
-                  />
-                  <span>
-                    Đặt độ dài Meso = {parsed.weeks[parsed.weeks.length - 1].week} tuần
-                    <span className="text-ink/40"> (hiện tại {durationWeeks} tuần)</span>
-                  </span>
-                </label>
+                {/* Meso-level parameters only make sense for a multi-week file. */}
+                {isProgram && (
+                  <>
+                    <label className="flex items-start gap-2 text-xs text-ink/65 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={syncDuration}
+                        onChange={e => setSyncDuration(e.target.checked)}
+                        className="accent-amber mt-0.5"
+                      />
+                      <span>
+                        Đặt độ dài Meso = {plan.weeks[plan.weeks.length - 1].week} tuần
+                        <span className="text-ink/40"> (hiện tại {durationWeeks} tuần)</span>
+                      </span>
+                    </label>
 
-                <label className="flex items-start gap-2 text-xs text-ink/65 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={syncFrequency}
-                    onChange={e => setSyncFrequency(e.target.checked)}
-                    className="accent-amber mt-0.5"
-                  />
-                  <span>Đặt số buổi/tuần = {parsed.days.length}</span>
-                </label>
+                    <label className="flex items-start gap-2 text-xs text-ink/65 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={syncFrequency}
+                        onChange={e => setSyncFrequency(e.target.checked)}
+                        className="accent-amber mt-0.5"
+                      />
+                      <span>Đặt số buổi/tuần = {plan.days.length}</span>
+                    </label>
+                  </>
+                )}
               </div>
 
-              {mode === 'replace' && (
+              {mode === 'replace' && isProgram && (
                 <p className="text-[11px] text-danger/80 leading-relaxed">
                   ⚠ &ldquo;Thay thế toàn bộ&rdquo; sẽ xoá mọi bài tập hiện có của Meso{' '}
                   <span className="font-semibold">{phaseName}</span> — kể cả các tuần đã tùy chỉnh riêng.
+                </p>
+              )}
+              {mode === 'replace' && !isProgram && untouchedDays.length > 0 && (
+                <p className="text-[11px] text-danger/80 leading-relaxed">
+                  ⚠ Tệp không có {untouchedDays.map(d => `“${d.label}”`).join(', ')} — buổi đó sẽ trống
+                  ở {scopeLabel}. Chọn &ldquo;Thêm vào&rdquo; nếu muốn giữ nguyên.
                 </p>
               )}
 
@@ -739,7 +878,9 @@ export function ImportProgramExcelModal({
 
               <div className="flex gap-2">
                 <Button variant="herb" loading={importing} onClick={() => void handleImport()} className="flex-1">
-                  Tạo {parsed.weeks.length} tuần tập
+                  {isProgram
+                    ? `Tạo ${plan.weeks.length} tuần tập`
+                    : `Nhập ${plan.days.length} buổi vào ${scopeLabel}`}
                 </Button>
                 <Button variant="secondary" onClick={handleClose}>Huỷ</Button>
               </div>

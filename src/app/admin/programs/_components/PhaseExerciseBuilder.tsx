@@ -10,10 +10,8 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { TechniqueButton } from '@/components/training/TechniqueButton'
 import { ImportScheduleExcelModal } from './ImportScheduleExcelModal'
 import type { ImportResult } from './ImportScheduleExcelModal'
-import { ImportProgramExcelModal } from './ImportProgramExcelModal'
-import type { ProgramImportResult } from './ImportProgramExcelModal'
-import { ImportWeekExcelModal } from './ImportWeekExcelModal'
-import type { WeekImportResult } from './ImportWeekExcelModal'
+import { ImportPlanExcelModal } from './ImportPlanExcelModal'
+import type { PlanImportResult, ProgramImportResult, WeekImportResult } from './ImportPlanExcelModal'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import {
   recommendSplit,
@@ -452,13 +450,12 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   /** Short-lived banner summarising the last import. */
   const [importSummary, setImportSummary] = useState<ImportResult | null>(null)
 
-  // ── Excel import (whole meso — one sheet per week) ───────────────────────────
-  const [programImportOpen, setProgramImportOpen]       = useState(false)
+  // ── Excel import (tuần × buổi — one modal for both shapes of file) ───────────
+  // The file decides what it fills: several weeks → the whole meso, one week →
+  // just that week. Each write has its own summary banner.
+  const [planImportOpen, setPlanImportOpen]             = useState(false)
   const [programImportSummary, setProgramImportSummary] = useState<ProgramImportResult | null>(null)
-
-  // ── Excel import (every buổi tập of the week being viewed) ───────────────────
-  const [weekImportOpen, setWeekImportOpen]       = useState(false)
-  const [weekImportSummary, setWeekImportSummary] = useState<WeekImportResult | null>(null)
+  const [weekImportSummary, setWeekImportSummary]       = useState<WeekImportResult | null>(null)
 
   // ── Add exercise form ────────────────────────────────────────────────────────
   const [addOpen, setAddOpen]             = useState(false)
@@ -796,8 +793,9 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     setSelectedWeek(null)
     setImportOpen(false)
     setImportSummary(null)
-    setProgramImportOpen(false)
+    setPlanImportOpen(false)
     setProgramImportSummary(null)
+    setWeekImportSummary(null)
   }, [selectedBlockId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Phase change ─────────────────────────────────────────────────────────────
@@ -843,8 +841,9 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     setEditingOLId(null)
     setImportOpen(false)
     setImportSummary(null)
-    setProgramImportOpen(false)
+    setPlanImportOpen(false)
     setProgramImportSummary(null)
+    setWeekImportSummary(null)
     // Per-week (migration 011): start each phase on the base ("Gốc") scope.
     setSelectedWeek(null)
     // Reset orphan-recovery & copy-day selections for the new phase context.
@@ -1870,7 +1869,22 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     })
   }
 
-  // ── One-week Excel import (every buổi tập of the week being viewed) ───────────
+  /**
+   * One Excel import, two possible writes. The modal already worked out which
+   * one the file describes — the builder just routes the result to the handler
+   * that knows how to adopt it, and clears the other banner.
+   */
+  function handlePlanImported(result: PlanImportResult) {
+    if (result.kind === 'program') {
+      setWeekImportSummary(null)
+      handleProgramImported(result)
+    } else {
+      setProgramImportSummary(null)
+      handleWeekImported(result)
+    }
+  }
+
+  // ── One-week Excel import (every buổi tập of one week) ───────────────────────
   // Same contract as the whole-program import, except only ONE week scope was
   // rewritten server-side: the returned rows are still the meso's full state, so
   // the table adopts them wholesale while the week tab stays where it was.
@@ -2215,25 +2229,19 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
                   {weekBusy && (
                     <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber border-t-transparent" />
                   )}
-                  {/* One-week import: every buổi tập of the week being viewed. */}
+                  {/* One importer for both shapes: many buổi, many tuần, or both. */}
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => { setWeekImportSummary(null); setWeekImportOpen(true) }}
+                    onClick={() => {
+                      setProgramImportSummary(null)
+                      setWeekImportSummary(null)
+                      setPlanImportOpen(true)
+                    }}
                     disabled={!selectedPhaseId}
-                    title={`Nhập tất cả buổi tập của ${selectedWeek == null ? 'bộ Gốc' : `Tuần ${selectedWeek}`} từ một file Excel`}
+                    title="Nhập giáo án từ Excel — nhiều buổi trong một tuần, hoặc cả chương trình nhiều tuần"
                   >
-                    ⬆ Nhập cả tuần ({selectedWeek == null ? 'Gốc' : `Tuần ${selectedWeek}`})
-                  </Button>
-                  {/* Whole-meso import: each sheet of the workbook becomes a week. */}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => { setProgramImportSummary(null); setProgramImportOpen(true) }}
-                    disabled={!selectedPhaseId}
-                    title="Nhập cả chương trình nhiều tuần từ Excel — mỗi sheet là một tuần"
-                  >
-                    ⬆ Nhập chương trình (nhiều tuần)
+                    ⬆ Nhập từ Excel (tuần & buổi)
                   </Button>
                 </div>
               </div>
@@ -3878,32 +3886,20 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
         />
       )}
 
-      {/* ── Nhập tất cả buổi tập của MỘT tuần ─────────────────────────────── */}
+      {/* ── Nhập từ Excel: nhiều buổi trong một tuần, hoặc cả chương trình ── */}
       {selectedPhaseId && (
-        <ImportWeekExcelModal
-          open={weekImportOpen}
-          onClose={() => setWeekImportOpen(false)}
+        <ImportPlanExcelModal
+          open={planImportOpen}
+          onClose={() => setPlanImportOpen(false)}
           exercises={exercises}
           phaseId={selectedPhaseId}
           phaseName={selectedPhase?.name ?? 'Meso'}
           splitDays={splitDays}
           splitType={splitType}
-          weekNumber={selectedWeek}
-          onImported={handleWeekImported}
-        />
-      )}
-
-      {/* ── Nhập cả chương trình (mỗi sheet = một tuần) ───────────────────── */}
-      {selectedPhaseId && (
-        <ImportProgramExcelModal
-          open={programImportOpen}
-          onClose={() => setProgramImportOpen(false)}
-          exercises={exercises}
-          phaseId={selectedPhaseId}
-          phaseName={selectedPhase?.name ?? 'Meso'}
-          splitDays={splitDays}
           durationWeeks={durationWeeks}
-          onImported={handleProgramImported}
+          selectedWeek={selectedWeek}
+          activeDayLabel={splitType ? (activeDay?.label ?? null) : null}
+          onImported={handlePlanImported}
         />
       )}
 
