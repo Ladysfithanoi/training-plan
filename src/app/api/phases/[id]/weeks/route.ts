@@ -1,14 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireContentAuthor } from '@/lib/auth'
+import { insertPhaseExercises } from '@/lib/phaseExerciseInsert'
 
 const PE_SELECT = '*, exercise:exercises(*, movement_pattern:movement_patterns(*))'
-
-/** True when an error is PostgREST/Postgres reporting a missing column. */
-function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
-  if (!err) return false
-  if (err.code === 'PGRST204' || err.code === '42703') return true
-  return ['week_number', 'is_amrap', 'target_percentage_1rm', 'sort_order'].some(c => err.message?.includes(c))
-}
 
 /**
  * POST /api/phases/[id]/weeks   body: { week: number }
@@ -58,17 +52,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         return { ...rest, week_number: week }
       })
 
-      // Attempt 1: insert with all columns.
-      let insertErr = (await supabase.from('phase_exercises').insert(cloneRows)).error
-      // Attempt 2: optional columns missing → drop them and retry.
-      if (insertErr && isMissingColumnError(insertErr)) {
-        const stripped = cloneRows.map(r => {
-          const c = { ...r } as Record<string, unknown>
-          for (const k of ['week_number', 'is_amrap', 'target_percentage_1rm', 'sort_order']) delete c[k]
-          return c
-        })
-        insertErr = (await supabase.from('phase_exercises').insert(stripped)).error
-      }
+      // Retries without whichever optional column the DB lacks, one at a time.
+      // week_number is never dropped here — without it the "copy" would land in
+      // the base scope and silently duplicate the Gốc program instead.
+      const { error: insertErr } = await insertPhaseExercises(
+        async r => (await supabase.from('phase_exercises').insert(r)).error,
+        cloneRows as Record<string, unknown>[],
+      )
       if (insertErr) return Response.json({ error: insertErr.message }, { status: 500 })
     }
   }

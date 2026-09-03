@@ -80,6 +80,8 @@ interface Parsed {
 export interface ProgramImportResult {
   added: number
   weeks: number[]
+  /** Set when the DB lacks an optional column — the rows still landed. */
+  droppedNote: string | null
   createdExercises: { id: string; name: string }[]
   phase: Phase | null
   exercises: (PhaseExercise & { exercise: Exercise })[]
@@ -90,6 +92,8 @@ export interface ProgramImportResult {
 export interface WeekImportResult {
   added: number
   week: number | null
+  /** Set when the DB lacks an optional column — the rows still landed. */
+  droppedNote: string | null
   createdExercises: { id: string; name: string }[]
   phase: Phase | null
   exercises: (PhaseExercise & { exercise: Exercise })[]
@@ -430,6 +434,7 @@ export function ImportPlanExcelModal({
         const result: PlanImportResult = {
           kind:             'program',
           added:            data.added ?? 0,
+          droppedNote:      data.dropped_note ?? null,
           weeks:            data.weeks ?? [],
           createdExercises: data.created_exercises ?? [],
           phase:            data.phase ?? null,
@@ -473,6 +478,7 @@ export function ImportPlanExcelModal({
       const result: PlanImportResult = {
         kind:             'week',
         added:            data.added ?? 0,
+        droppedNote:      data.dropped_note ?? null,
         week:             targetWeek,
         createdExercises: data.created_exercises ?? [],
         phase:            data.phase ?? null,
@@ -518,6 +524,11 @@ export function ImportPlanExcelModal({
             {' '}đã được ghi vào <span className="font-semibold text-ink/75">{phaseName}</span>
             {done.kind === 'week' && done.week != null && ' — các tuần khác giữ nguyên'}.
           </p>
+          {done.droppedNote && (
+            <div className="mx-auto max-w-md rounded-xl border border-danger/25 bg-danger/5 px-4 py-3 text-left">
+              <p className="text-xs text-danger/90 leading-relaxed">⚠ {done.droppedNote}</p>
+            </div>
+          )}
           {done.createdExercises.length > 0 && (
             <div className="mx-auto max-w-md rounded-xl border border-amber/25 bg-amber/6 px-4 py-3 text-left">
               <p className="text-xs font-semibold text-amber mb-1">

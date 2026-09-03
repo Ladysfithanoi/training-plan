@@ -1,5 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireContentAuthor } from '@/lib/auth'
+import { droppedColumnsNote, insertPhaseExercises } from '@/lib/phaseExerciseInsert'
+
+/** Rows come back with the exercise joined — the client refreshes from them. */
+type PhaseExerciseRow = Record<string, unknown>
 
 /**
  * POST /api/phases/[id]/exercises/import
@@ -25,17 +29,6 @@ import { requireContentAuthor } from '@/lib/auth'
  *            order_label?, loading_style?, is_warmup?, notes? }]
  * }
  */
-
-// Columns added by later migrations — may not exist on the live DB yet.
-// 006: is_amrap, target_percentage_1rm · 008: sort_order · 011: week_number · 012: is_warmup
-const OPTIONAL_COLUMNS = ['is_amrap', 'target_percentage_1rm', 'sort_order', 'week_number', 'is_warmup'] as const
-
-/** True when an error is PostgREST/Postgres reporting a missing column. */
-function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
-  if (!err) return false
-  if (err.code === 'PGRST204' || err.code === '42703') return true
-  return OPTIONAL_COLUMNS.some(c => err.message?.includes(c))
-}
 
 const PE_SELECT = '*, exercise:exercises(*, movement_pattern:movement_patterns(*))'
 
@@ -200,19 +193,30 @@ export async function POST(request: Request, ctx: RouteContext<'/api/phases/[id]
   const records = base.map((b, i) => ({ ...b, ...optional[i] }))
 
   // ── 5. Insert, tolerating a DB without the optional columns ─────────────────
-  let result = await supabase.from('phase_exercises').insert(records).select(PE_SELECT)
+  // One column is dropped at a time (see lib/phaseExerciseInsert) so the rows
+  // keep their week scope — the old all-or-nothing retry silently wrote a
+  // week's import into the base ("Gốc") program.
+  // Held in an object so the successful attempt's rows survive the retry loop.
+  const captured: { rows: PhaseExerciseRow[] } = { rows: [] }
 
-  if (result.error && isMissingColumnError(result.error)) {
-    result = await supabase.from('phase_exercises').insert(base).select(PE_SELECT)
-  }
+  const { error: insertError, dropped } = await insertPhaseExercises(
+    async rows => {
+      const res = await supabase.from('phase_exercises').insert(rows).select(PE_SELECT)
+      captured.rows = (res.data ?? []) as PhaseExerciseRow[]
+      return res.error
+    },
+    records,
+  )
 
-  if (result.error) {
-    return Response.json({ error: result.error.message }, { status: 400 })
+  if (insertError) {
+    return Response.json({ error: insertError.message }, { status: 400 })
   }
 
   return Response.json({
-    added: result.data?.length ?? 0,
+    added: captured.rows.length,
+    dropped_columns: dropped,
+    dropped_note: droppedColumnsNote(dropped),
     created_exercises: createdExercises,
-    exercises: result.data,
+    exercises: captured.rows,
   }, { status: 201 })
 }

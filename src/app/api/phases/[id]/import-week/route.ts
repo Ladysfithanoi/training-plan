@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireContentAuthor } from '@/lib/auth'
+import { droppedColumnsNote, insertPhaseExercises } from '@/lib/phaseExerciseInsert'
 
 /**
  * POST /api/phases/[id]/import-week
@@ -290,17 +291,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   const records = base.map((b, i) => ({ ...b, ...optional[i] }))
 
   // ── 6. Insert, tolerating a DB without the optional columns ─────────────────
-  let insertError = (await supabase.from('phase_exercises').insert(records)).error
-
-  if (insertError && isMissingColumnError(insertError)) {
-    if (weekNumber != null) {
-      return Response.json(
-        { error: 'Cơ sở dữ liệu chưa hỗ trợ giáo án theo tuần (thiếu cột week_number).' },
-        { status: 400 },
-      )
-    }
-    insertError = (await supabase.from('phase_exercises').insert(base)).error
-  }
+  // Degrades one COLUMN at a time (see lib/phaseExerciseInsert) so every row
+  // still lands; a missing week_number stops the import instead of dumping this
+  // week's rows into the base scope.
+  const { error: insertError, dropped } = await insertPhaseExercises(
+    async rows => (await supabase.from('phase_exercises').insert(rows)).error,
+    records,
+  )
 
   if (insertError) {
     return Response.json({ error: insertError.message }, { status: 400 })
@@ -348,6 +345,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 
   return Response.json({
     added:             records.length,
+    dropped_columns:   dropped,
+    dropped_note:      droppedColumnsNote(dropped),
     week:              weekNumber,
     days:              splitDays.length,
     created_exercises: createdExercises,

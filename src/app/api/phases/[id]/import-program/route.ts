@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireContentAuthor } from '@/lib/auth'
+import { droppedColumnsNote, insertPhaseExercises } from '@/lib/phaseExerciseInsert'
 
 /**
  * POST /api/phases/[id]/import-program
@@ -296,14 +297,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   const records = base.map((b, i) => ({ ...b, ...optional[i] }))
 
   // ── 6. Insert, tolerating a DB without the optional columns ─────────────────
-  // Without week_number every scope would collapse onto the same rows, so the
-  // fallback drops the duplicated base pass and writes the sheets only once.
-  let insertError = (await supabase.from('phase_exercises').insert(records)).error
-
-  if (insertError && isMissingColumnError(insertError)) {
-    const baseOnly = base.filter((_, i) => optional[i].week_number == null)
-    insertError = (await supabase.from('phase_exercises').insert(baseOnly)).error
-  }
+  // Degrades one COLUMN at a time (see lib/phaseExerciseInsert): every row of
+  // every week still lands. A DB with no week_number at all stops the import
+  // rather than flattening the weeks into copies of the base program.
+  const { error: insertError, dropped } = await insertPhaseExercises(
+    async rows => (await supabase.from('phase_exercises').insert(rows)).error,
+    records,
+  )
 
   if (insertError) {
     return Response.json({ error: insertError.message }, { status: 400 })
@@ -354,6 +354,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 
   return Response.json({
     added:             records.length,
+    dropped_columns:   dropped,
+    dropped_note:      droppedColumnsNote(dropped),
     weeks:             weeks.map(w => w.week),
     days:              splitDays.length,
     created_exercises: createdExercises,
