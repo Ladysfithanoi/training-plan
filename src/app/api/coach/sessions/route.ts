@@ -1,5 +1,6 @@
 import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
+import { todayISO } from '@/lib/date'
 
 /**
  * GET /api/coach/sessions
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
       user_id:        profile.id,
       phase_id:       body.phase_id       ?? null,
       user_program_id: body.user_program_id ?? null,
-      session_date:   new Date().toISOString().split('T')[0],
+      session_date:   todayISO(),
       status:         'in_progress',
       notes:          null,
     })

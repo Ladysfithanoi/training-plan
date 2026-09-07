@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { PhaseTimeline } from '@/components/programs/PhaseTimeline'
 import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
 import { phaseTypeLabel, phaseTypeBadgeClass, currentWeekInPhase, formatDate, cn } from '@/lib/utils'
+import { addDaysISO, todayISO } from '@/lib/date'
 import type { UserProgram, WorkoutSession } from '@/types'
 import Link from 'next/link'
 
@@ -37,7 +38,13 @@ export default async function DashboardPage() {
       phase_start_date: activeProgram.phase_start_date,
       current_phase: activeProgram.current_phase,
     })
-    if (advanceResult.advanced && !advanceResult.completed) {
+    if (advanceResult.advanced && advanceResult.completed) {
+      // Last meso finished — the program is now `completed` in the DB. Drop the
+      // stale active row so the phase card doesn't keep rendering the old meso
+      // overrunning its length ("Tuần 5/4"); the completion banner below says
+      // what happened. Mirrors /admin/my-training and the guest route.
+      activeProgram = null
+    } else if (advanceResult.advanced) {
       const { data: refreshed } = await supabase
         .from('user_programs')
         .select('*, block:training_blocks(*, phases(*)), current_phase:phases(*)')
@@ -64,15 +71,15 @@ export default async function DashboardPage() {
     ? currentWeekInPhase(activeProgram.phase_start_date)
     : null
 
-  // Tổng khối lượng tuần này
-  const weekStart = new Date()
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
+  // Tổng khối lượng tuần này — tuần lịch bắt đầu từ Chủ nhật, tính theo giờ VN
+  const today = todayISO()
+  const weekStart = addDaysISO(today, -new Date(`${today}T00:00:00Z`).getUTCDay())
   const { data: weekSessions } = await supabase
     .from('workout_sessions')
     .select('id')
     .eq('user_id', user.id)
     .eq('status', 'completed')
-    .gte('session_date', weekStart.toISOString().split('T')[0])
+    .gte('session_date', weekStart)
 
   const weekSessionIds = weekSessions?.map(s => s.id) ?? []
   let weeklyVolume = 0

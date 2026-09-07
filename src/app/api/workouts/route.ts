@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { todayISO } from '@/lib/date'
 
 /** GET /api/workouts — list user's sessions */
 export async function GET(request: Request) {
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       phase_id: body.phase_id ?? null,
       user_program_id: body.user_program_id ?? null,
-      session_date: body.session_date ?? new Date().toISOString().split('T')[0],
+      session_date: body.session_date ?? todayISO(),
       status: body.status ?? 'planned',
       notes: body.notes ?? null,
     })

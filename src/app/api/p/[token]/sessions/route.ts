@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { resolveGuestToken } from '@/lib/guestToken'
+import { todayISO } from '@/lib/date'
 
 /** GET /api/p/[token]/sessions — list sessions for the guest athlete */
 export async function GET(
@@ -40,7 +41,7 @@ export async function POST(
       user_id: userId,
       phase_id: body.phase_id ?? null,
       user_program_id: body.user_program_id ?? null,
-      session_date: body.session_date ?? new Date().toISOString().split('T')[0],
+      session_date: body.session_date ?? todayISO(),
       status: 'in_progress',
       notes: null,
     })

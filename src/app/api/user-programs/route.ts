@@ -1,5 +1,6 @@
 import { requireStaff } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
+import { todayISO } from '@/lib/date'
 
 /** POST /api/user-programs — assign a training block to a user */
 export async function POST(request: Request) {
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle()
 
-  const effectiveStartDate = start_date ?? new Date().toISOString().split('T')[0]
+  const effectiveStartDate = start_date ?? todayISO()
 
   const { data, error } = await supabase
     .from('user_programs')

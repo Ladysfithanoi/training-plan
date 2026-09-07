@@ -17,6 +17,7 @@ import { collectLoggedExerciseIds, isFinalSessionOfProgram } from '@/lib/program
 import { ExerciseMatrix } from '@/components/training/ExerciseMatrix'
 import { ProgramCompleteBanner, ProgramCompleteModal } from '@/components/training/ProgramCompleteCelebration'
 import { CoachProgramSelector } from './CoachProgramSelector'
+import { todayISO } from '@/lib/date'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -280,7 +281,7 @@ export function CoachTrainingView({
   // Restore in-progress session on mount (completed case is already hydrated above)
   useEffect(() => {
     if (todayCompletedSession) return            // already locked — nothing to restore
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = todayISO()
     const inProgress = recentSessions.find(
       s => s?.status === 'in_progress' && s?.session_date === todayStr,
     )
@@ -538,7 +539,7 @@ export function CoachTrainingView({
       // Non-current weeks: no live editing — hydrate their logged data read-only.
       if (activeWeek !== weekInPhase) { hydrateHistoricWeek(activeWeek); return }
 
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = todayISO()
       console.log(
         '[CoachTrainingView] tab changed → checking DB',
         `date=${todayStr}  week=${activeWeek}  day=${activeDayId ?? 'none'}`,

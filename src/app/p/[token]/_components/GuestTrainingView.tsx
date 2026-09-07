@@ -16,6 +16,7 @@ import { extractSuggestionFromNotes, extractSurveyFromNotes } from '@/lib/sessio
 import { collectLoggedExerciseIds, isFinalSessionOfProgram } from '@/lib/programCompletion'
 import { ExerciseMatrix } from '@/components/training/ExerciseMatrix'
 import { ProgramCompleteBanner, ProgramCompleteModal } from '@/components/training/ProgramCompleteCelebration'
+import { todayISO } from '@/lib/date'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -200,7 +201,7 @@ export function GuestTrainingView({
   // Restore in-progress session on mount
   useEffect(() => {
     if (todayCompletedSession) return
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = todayISO()
     const inProgress = recentSessions.find(s => s?.status === 'in_progress' && s?.session_date === todayStr)
     if (!inProgress) return
     fetch(`/api/p/${token}/sessions/${inProgress.id}`)
@@ -361,7 +362,7 @@ export function GuestTrainingView({
 
     async function recheckSession() {
       if (activeWeek !== weekInPhase) { hydrateHistoricWeek(activeWeek); return }
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = todayISO()
       try {
         const r = await fetch(`/api/p/${token}/sessions`)
         if (!r.ok) return

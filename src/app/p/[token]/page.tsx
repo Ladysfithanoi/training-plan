@@ -6,6 +6,7 @@ import { currentWeekInPhase, weekOfDateInPhase } from '@/lib/utils'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
 import { GuestTrainingView } from './_components/GuestTrainingView'
 import type { PhaseExercise, WorkoutSession, WorkoutSet, UserProgram, WeekType } from '@/types'
+import { todayISO } from '@/lib/date'
 
 export const metadata = { title: 'Chương trình Tập luyện' }
 
@@ -133,7 +134,7 @@ export default async function GuestProgramPage({
   type CompletedSessionWithSets = WorkoutSession & { sets: WorkoutSet[] }
   let todayCompletedSession: CompletedSessionWithSets | null = null
   {
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = todayISO()
     const { data: todayRows } = await admin
       .from('workout_sessions')
       .select('*, sets:workout_sets(*)')

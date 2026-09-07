@@ -1,5 +1,6 @@
 import { requireStaff } from '@/lib/auth'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { todayISO } from '@/lib/date'
 
 /**
  * GET /api/coach/my-program
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle()
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayISO()
 
   const { data, error } = await supabase
     .from('user_programs')

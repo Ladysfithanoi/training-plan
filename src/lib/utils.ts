@@ -1,4 +1,5 @@
 import type { PhaseType, ProgramStatus, SessionStatus, ExerciseType } from '@/types'
+import { daysBetweenISO, todayISO } from './date'
 
 // ─── Class merging ────────────────────────────────────────────────────────────
 /** Minimal clsx-like utility (no dependency needed) */
@@ -26,29 +27,43 @@ export function diffDays(a: Date, b: Date): number {
   return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24))
 }
 
-/** Returns the week number (1-based) within a phase */
+/**
+ * Returns the week number (1-based) within a phase, on the Vietnam calendar.
+ *
+ * Counted from `phase_start_date`, so week 2 begins on the same weekday the
+ * meso started — at LOCAL midnight. This used to be derived from the server's
+ * UTC clock, which made every week (and with it every meso rollover) arrive
+ * seven hours late: 07:00 Vietnam time instead of 00:00. See `@/lib/date`.
+ */
 export function currentWeekInPhase(phaseStartDate: string): number {
-  const start = new Date(phaseStartDate)
-  const today = new Date()
-  const days = diffDays(start, today)
-  return Math.max(1, Math.floor(days / 7) + 1)
+  return weekOfDateInPhase(phaseStartDate, todayISO())
 }
 
 /**
  * Returns the 1-based week number within a phase for an arbitrary date
- * (e.g. a past session's `session_date`). Same arithmetic as
- * `currentWeekInPhase`, but relative to the supplied date instead of "now",
- * so logged sessions can be bucketed back into the week they belong to.
+ * (e.g. a past session's `session_date`), so logged sessions can be bucketed
+ * back into the week they belong to.
  */
 export function weekOfDateInPhase(phaseStartDate: string, dateStr: string): number {
-  const days = diffDays(new Date(phaseStartDate), new Date(dateStr))
+  const days = daysBetweenISO(phaseStartDate, dateStr)
+  if (Number.isNaN(days)) return 1
   return Math.max(1, Math.floor(days / 7) + 1)
 }
 
-/** True if the phase has exceeded its duration */
+/**
+ * True once the phase has run its full length — from the first day that would
+ * otherwise be week `durationWeeks + 1`.
+ *
+ * Deliberately the exact complement of `currentWeekInPhase`: the meso expires
+ * on the very same day the week counter would overrun ("Tuần 5/4"), so the two
+ * can never drift apart the way they could when one compared timestamps and
+ * the other compared whole days.
+ */
 export function isPhaseExpired(phaseStartDate: string, durationWeeks: number): boolean {
-  const end = addWeeks(new Date(phaseStartDate), durationWeeks)
-  return new Date() > end
+  if (!phaseStartDate || !durationWeeks || durationWeeks < 1) return false
+  const days = daysBetweenISO(phaseStartDate, todayISO())
+  if (Number.isNaN(days)) return false
+  return days >= durationWeeks * 7
 }
 
 // ─── Label helpers (Vietnamese) ───────────────────────────────────────────────

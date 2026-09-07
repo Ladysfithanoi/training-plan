@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 import { trialState } from '@/lib/trial'
 import type { Profile, TrainingBlock } from '@/types'
+import { todayISO } from '@/lib/date'
 
 interface UsersManagerProps {
   users: Profile[]
@@ -56,7 +57,7 @@ export function UsersManager({ users: initialUsers, blocks, isAdmin }: UsersMana
 
   // Giao giáo án
   const [selectedBlock, setSelectedBlock] = useState('')
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0])
+  const [startDate, setStartDate] = useState(todayISO())
   const [assigning, setAssigning] = useState(false)
 
   // Gửi chương trình — magic link

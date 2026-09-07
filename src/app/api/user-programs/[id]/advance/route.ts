@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { todayISO } from '@/lib/date'
 
 /**
  * POST /api/user-programs/[id]/advance
@@ -42,7 +43,7 @@ export async function POST(
     .limit(1)
     .maybeSingle()
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = todayISO()
 
   if (!nextPhase) {
     // No more phases — mark program as completed

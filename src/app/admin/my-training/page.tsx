@@ -5,6 +5,7 @@ import { currentWeekInPhase, weekOfDateInPhase } from '@/lib/utils'
 import type { TrainingBlock, PhaseExercise, UserProgram, WeekType, WorkoutSession, WorkoutSet } from '@/types'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
 import { CoachTrainingView } from './_components/CoachTrainingView'
+import { todayISO } from '@/lib/date'
 
 export const metadata = { title: 'Lịch tập của tôi' }
 export const dynamic = 'force-dynamic'
@@ -144,7 +145,7 @@ export default async function CoachMyTrainingPage({
   type CompletedSessionWithSets = WorkoutSession & { sets: WorkoutSet[] }
   let todayCompletedSession: CompletedSessionWithSets | null = null
   {
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = todayISO()
     const { data: todayRows } = await supabase
       .from('workout_sessions')
       .select('*, sets:workout_sets(*)')
