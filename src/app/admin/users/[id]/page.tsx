@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { autoAdvanceUserProgram } from '@/lib/transitions'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { AthleteDetailTabs } from './_components/AthleteDetailTabs'
@@ -39,6 +40,13 @@ export default async function AthleteDetailPage({
   // dashboard feed also lists staff sessions (coach / trial / admin), so
   // filtering on role === 'user' turned those "Chi tiết →" links into a 404.
   if (!profile) notFound()
+
+  // ── Tự động chuyển Meso khi giai đoạn hết hạn ─────────────────────────────
+  // HLV xem học viên cũng phải kích hoạt việc chuyển Meso: trước đây chỉ 3 trang
+  // mà CHÍNH chủ tài khoản mở mới chuyển, nên học viên chưa mở app lần nào thì
+  // HLV thấy mãi "Tuần 3/2". Dùng service-role client để không phụ thuộc vào
+  // việc học viên đó có do chính HLV này tạo ra hay không (RLS).
+  await autoAdvanceUserProgram(id, createAdminClient())
 
   // ── Active user_program with block + phase ─────────────────────────────────
   const { data: userProgram } = await supabase

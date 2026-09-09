@@ -52,6 +52,11 @@ export async function proxy(request: NextRequest) {
     // Recipients (students) must reach these WITHOUT logging in.
     path.startsWith('/p/') ||
     path.startsWith('/api/p/') ||
+    // Vercel Cron (chuyển Meso hằng đêm). Cron gọi không kèm cookie phiên, nên
+    // nhánh 401 bên dưới đã chặn sạch mọi lần chạy: học viên không mở app thì
+    // Meso không bao giờ được chuyển, bộ đếm tuần cứ tăng quá độ dài giai đoạn
+    // ("Tuần 3/2"). Bản thân route tự xác thực bằng CRON_SECRET.
+    path.startsWith('/api/cron/') ||
     // Landing page shown to a trial account whose window has ended.
     path.startsWith('/trial-expired') ||
     path.startsWith('/_next') ||

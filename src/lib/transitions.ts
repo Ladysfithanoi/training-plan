@@ -81,11 +81,62 @@ export async function autoAdvancePhaseIfExpired(
   return { advanced: true, completed: false, nextPhaseName: nextPhase.name }
 }
 
+/** The columns `autoAdvancePhaseIfExpired` needs, for a program read by user id. */
+// One literal string on purpose: supabase-js derives the row type from the
+// select text, and a concatenated string widens every column to `unknown`.
+const PROGRAM_SELECT = 'id, block_id, current_phase_id, phase_start_date, current_phase:phases(name, duration_weeks, phase_order)'
+
+/**
+ * Reads a user's active program and rolls it over when the current meso has run
+ * its course.
+ *
+ * Call this BEFORE the page reads the program it is about to render: the render
+ * query then sees the already-advanced row, so no page needs a second "refresh"
+ * read, and the week counter can never be drawn past its meso ("Tuần 3/2").
+ *
+ * Pass `client` when the caller has no session for that user — the public guest
+ * route and the coach looking at a student both use the service-role client.
+ */
+export async function autoAdvanceUserProgram(
+  userId: string,
+  client?: AdvanceClient,
+): Promise<AdvanceResult> {
+  const supabase = client ?? (await createClient())
+
+  const { data, error } = await supabase
+    .from('user_programs')
+    .select(PROGRAM_SELECT)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('assigned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data?.current_phase_id || !data.phase_start_date) return NO_CHANGE
+
+  const phase = data.current_phase as unknown as
+    { name: string; duration_weeks: number; phase_order: number } | null
+  if (!phase) return NO_CHANGE
+
+  return autoAdvancePhaseIfExpired(
+    {
+      id: data.id,
+      block_id: data.block_id,
+      current_phase_id: data.current_phase_id,
+      phase_start_date: data.phase_start_date,
+      current_phase: phase,
+    },
+    supabase,
+  )
+}
+
 /**
  * Called by the Vercel Cron job — advances all expired programs across all users.
  *
- * A safety net only: every training page advances its own program on load, so
- * an athlete who opens the app never waits for the nightly run.
+ * This is the ONLY rollover an athlete who never opens the app can get — the
+ * per-page advance cannot run for them. Reachability matters as much as the
+ * logic: `src/proxy.ts` must keep `/api/cron/` public, otherwise every nightly
+ * run is answered with 401 and no meso ever rolls over by itself.
  */
 export async function batchAdvanceExpiredPhases(): Promise<{
   checked: number
@@ -96,7 +147,7 @@ export async function batchAdvanceExpiredPhases(): Promise<{
 
   const { data: activePrograms } = await admin
     .from('user_programs')
-    .select('id, block_id, current_phase_id, phase_start_date, current_phase:phases(name, duration_weeks, phase_order)')
+    .select(PROGRAM_SELECT)
     .eq('status', 'active')
     .not('current_phase_id', 'is', null)
     .not('phase_start_date', 'is', null)

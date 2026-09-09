@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { autoAdvanceUserProgram } from '@/lib/transitions'
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { PhaseTimeline } from '@/components/programs/PhaseTimeline'
@@ -8,6 +9,7 @@ import type { UserProgram } from '@/types'
 import Link from 'next/link'
 
 export const metadata = { title: 'Chương trình của tôi' }
+export const dynamic = 'force-dynamic'
 
 export default async function ProgramsPage() {
   const supabase = await createClient()
@@ -16,6 +18,11 @@ export default async function ProgramsPage() {
   } = await supabase.auth.getUser()
 
   if (!user) return null
+
+  // ── Tự động chuyển Meso khi giai đoạn hết hạn ─────────────────────────────
+  // Trang này cũng vẽ tiến trình giai đoạn, nên phải chuyển Meso trước khi đọc —
+  // nếu không, học viên chỉ vào đây sẽ thấy mãi một Meso đã hết hạn.
+  await autoAdvanceUserProgram(user.id)
 
   const { data: programs } = await supabase
     .from('user_programs')

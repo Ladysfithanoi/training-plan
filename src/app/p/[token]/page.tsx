@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { resolveGuestToken } from '@/lib/guestToken'
-import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
+import { autoAdvanceUserProgram } from '@/lib/transitions'
 import { currentWeekInPhase, weekOfDateInPhase } from '@/lib/utils'
 import { extractSuggestionFromNotes } from '@/lib/sessionNotes'
 import { GuestTrainingView } from './_components/GuestTrainingView'
@@ -9,6 +9,9 @@ import type { PhaseExercise, WorkoutSession, WorkoutSet, UserProgram, WeekType }
 import { todayISO } from '@/lib/date'
 
 export const metadata = { title: 'Chương trình Tập luyện' }
+// Trang này tự chuyển Meso khi đọc, nên không được phục vụ từ bản HTML đã cache:
+// học viên mở link phải luôn thấy trạng thái mới nhất.
+export const dynamic = 'force-dynamic'
 
 /** Public guest route — no Supabase auth required, validated by magic token only */
 export default async function GuestProgramPage({
@@ -32,6 +35,12 @@ export default async function GuestProgramPage({
 
   if (!profile) notFound()
 
+  // ── Tự động chuyển Meso khi giai đoạn hết hạn ─────────────────────────────
+  // Chạy TRƯỚC khi đọc giáo án (bằng service-role client, vì đây là trang công
+  // khai không có phiên đăng nhập): truy vấn bên dưới luôn thấy Meso đã chuyển,
+  // nên bộ đếm tuần không bao giờ vượt quá độ dài Meso ("Tuần 3/2").
+  const { completed: programCompleted } = await autoAdvanceUserProgram(userId, admin)
+
   // ── Active user_program + current phase ───────────────────────────────────
   const { data: rawProgram } = await admin
     .from('user_programs')
@@ -40,7 +49,7 @@ export default async function GuestProgramPage({
     .eq('status', 'active')
     .maybeSingle()
 
-  let userProgram = rawProgram as (UserProgram & {
+  const userProgram = rawProgram as (UserProgram & {
     block: { name: string } | null
     current_phase: {
       name: string
@@ -53,39 +62,6 @@ export default async function GuestProgramPage({
       split_days: Array<{ id: string; type: string; label: string }>
     } | null
   }) | null
-
-  // ── Tự động chuyển Meso khi giai đoạn hết hạn ─────────────────────────────
-  // Uses the admin client (this is a public, session-less route) so the meso
-  // rolls over instead of the week counter overrunning (e.g. "Tuần 5/4").
-  let programCompleted = false
-  if (userProgram?.current_phase && userProgram.phase_start_date && userProgram.current_phase_id) {
-    const cp = userProgram.current_phase as typeof userProgram.current_phase & { phase_order: number }
-    const result = await autoAdvancePhaseIfExpired(
-      {
-        id: userProgram.id,
-        block_id: userProgram.block_id,
-        current_phase_id: userProgram.current_phase_id,
-        phase_start_date: userProgram.phase_start_date,
-        current_phase: { duration_weeks: cp.duration_weeks, phase_order: cp.phase_order, name: cp.name },
-      },
-      admin,
-    )
-    if (result.advanced && result.completed) {
-      // Last meso finished — the program is now `completed`. Drop the stale
-      // active program so the week counter doesn't overrun ("Tuần 3/2"); the
-      // view shows a completion notice instead.
-      userProgram = null
-      programCompleted = true
-    } else if (result.advanced && !result.completed) {
-      const { data: refreshed } = await admin
-        .from('user_programs')
-        .select('*, block:training_blocks(*), current_phase:phases(*)')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .maybeSingle()
-      if (refreshed) userProgram = refreshed as typeof userProgram
-    }
-  }
 
   // ── Phase exercises ────────────────────────────────────────────────────────
   let phaseExercises: PhaseExercise[] = []
@@ -168,7 +144,7 @@ export default async function GuestProgramPage({
 
   // ── Current week within the active phase ───────────────────────────────────
   const weekInPhase = userProgram?.phase_start_date
-    ? currentWeekInPhase(userProgram.phase_start_date)
+    ? currentWeekInPhase(userProgram.phase_start_date, userProgram.current_phase?.duration_weeks)
     : 1
 
   // Derive week_type from the current phase (migration 006)

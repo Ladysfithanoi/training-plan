@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { PhaseTimeline } from '@/components/programs/PhaseTimeline'
-import { autoAdvancePhaseIfExpired } from '@/lib/transitions'
+import { autoAdvanceUserProgram } from '@/lib/transitions'
 import { phaseTypeLabel, phaseTypeBadgeClass, currentWeekInPhase, formatDate, cn } from '@/lib/utils'
 import { addDaysISO, todayISO } from '@/lib/date'
 import type { UserProgram, WorkoutSession } from '@/types'
@@ -16,6 +16,12 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
+  // ── Tự động chuyển giai đoạn hết hạn ──────────────────────────────────────
+  // Chạy TRƯỚC khi đọc giáo án, nên truy vấn bên dưới luôn thấy Meso đã chuyển:
+  // không cần đọc lại, và khi Meso cuối kết thúc thì giáo án đã là `completed`
+  // nên `activeProgram` tự khắc rỗng (không còn hiển thị tuần vượt quá).
+  const advanceResult = await autoAdvanceUserProgram(user.id)
+
   // Fetch active program
   const { data: rawProgram } = await supabase
     .from('user_programs')
@@ -26,35 +32,7 @@ export default async function DashboardPage() {
     .limit(1)
     .maybeSingle()
 
-  let activeProgram = rawProgram as UserProgram | null
-
-  // ── Tự động chuyển giai đoạn hết hạn ──────────────────────────────────────
-  let advanceResult = { advanced: false, completed: false, nextPhaseName: null as string | null }
-  if (activeProgram?.current_phase && activeProgram.phase_start_date) {
-    advanceResult = await autoAdvancePhaseIfExpired({
-      id: activeProgram.id,
-      block_id: activeProgram.block_id,
-      current_phase_id: activeProgram.current_phase_id!,
-      phase_start_date: activeProgram.phase_start_date,
-      current_phase: activeProgram.current_phase,
-    })
-    if (advanceResult.advanced && advanceResult.completed) {
-      // Last meso finished — the program is now `completed` in the DB. Drop the
-      // stale active row so the phase card doesn't keep rendering the old meso
-      // overrunning its length ("Tuần 5/4"); the completion banner below says
-      // what happened. Mirrors /admin/my-training and the guest route.
-      activeProgram = null
-    } else if (advanceResult.advanced) {
-      const { data: refreshed } = await supabase
-        .from('user_programs')
-        .select('*, block:training_blocks(*, phases(*)), current_phase:phases(*)')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .limit(1)
-        .maybeSingle()
-      if (refreshed) activeProgram = refreshed as UserProgram
-    }
-  }
+  const activeProgram = rawProgram as UserProgram | null
 
   // Các buổi tập gần đây (include set count for live indicator)
   const { data: recentSessions } = await supabase
@@ -68,7 +46,7 @@ export default async function DashboardPage() {
   const sessions = (recentSessions ?? []) as SessionWithCount[]
   const phases = (activeProgram?.block as any)?.phases ?? []
   const weekNum = activeProgram?.phase_start_date
-    ? currentWeekInPhase(activeProgram.phase_start_date)
+    ? currentWeekInPhase(activeProgram.phase_start_date, activeProgram.current_phase?.duration_weeks)
     : null
 
   // Tổng khối lượng tuần này — tuần lịch bắt đầu từ Chủ nhật, tính theo giờ VN

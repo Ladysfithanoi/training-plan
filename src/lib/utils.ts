@@ -34,9 +34,17 @@ export function diffDays(a: Date, b: Date): number {
  * meso started — at LOCAL midnight. This used to be derived from the server's
  * UTC clock, which made every week (and with it every meso rollover) arrive
  * seven hours late: 07:00 Vietnam time instead of 00:00. See `@/lib/date`.
+ *
+ * Pass `durationWeeks` wherever the number is shown to a user: the result is
+ * then capped at the meso's length, so a rollover that did not happen (a failed
+ * write, a program nobody has opened since the cron was unreachable) degrades to
+ * "Tuần 2/2" instead of the nonsensical "Tuần 3/2". The meso being over is
+ * reported separately — see `isPhaseExpired`.
  */
-export function currentWeekInPhase(phaseStartDate: string): number {
-  return weekOfDateInPhase(phaseStartDate, todayISO())
+export function currentWeekInPhase(phaseStartDate: string, durationWeeks?: number): number {
+  const week = weekOfDateInPhase(phaseStartDate, todayISO())
+  if (!durationWeeks || durationWeeks < 1) return week
+  return Math.min(week, durationWeeks)
 }
 
 /**

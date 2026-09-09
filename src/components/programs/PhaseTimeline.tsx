@@ -19,7 +19,7 @@ export function PhaseTimeline({ phases, userProgram }: PhaseTimelineProps) {
           sorted.findIndex(p => p.id === currentPhaseId) > idx
 
         const weekNum = isCurrent && userProgram?.phase_start_date
-          ? currentWeekInPhase(userProgram.phase_start_date)
+          ? currentWeekInPhase(userProgram.phase_start_date, phase.duration_weeks)
           : null
 
         const expired = isCurrent && userProgram?.phase_start_date
