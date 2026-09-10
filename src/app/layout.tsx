@@ -1,6 +1,7 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Source_Serif_4, Be_Vietnam_Pro, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+import { InstallPrompt } from '@/components/pwa/InstallPrompt'
 
 // ── Brand font stack ──────────────────────────────────────────────────────────
 //  Source Serif 4  → editorial headings, section titles, emphasis italics
@@ -35,6 +36,23 @@ export const metadata: Metadata = {
     template: '%s · Kế hoạch Tập luyện',
   },
   description: 'Hệ thống phân kỳ tập luyện và theo dõi tiến độ chuyên nghiệp.',
+  // Cài vào màn hình chính iPhone/iPad: mở toàn màn hình như app riêng.
+  // Icon lấy từ src/app/apple-icon.png (quy ước tệp của Next), tên hiện dưới
+  // icon lấy từ `title` ở đây. Xem thêm src/app/manifest.ts.
+  appleWebApp: {
+    capable: true,
+    title: 'Tập luyện',
+    statusBarStyle: 'default',
+  },
+}
+
+// Khớp bề rộng máy và tràn ra cả vùng tai thỏ, thanh trạng thái tô theo màu nền
+// app — có vậy bản cài về mới trông như app thật, không như trang web bị cắt.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#F6F2EA',
 }
 
 export default function RootLayout({
@@ -47,7 +65,11 @@ export default function RootLayout({
       lang="vi"
       className={`${sourceSerif4.variable} ${beVietnamPro.variable} ${jetBrainsMono.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Banner hỏi cài app — tự ẩn khi đã cài hoặc khi máy không cài được. */}
+        <InstallPrompt />
+      </body>
     </html>
   )
 }

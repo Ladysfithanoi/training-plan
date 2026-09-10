@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#F6F2EA" />
+    <title>Mất kết nối · Kế hoạch Tập luyện</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+        padding: 24px; background: #f6f2ea; color: #14110e;
+        font-family: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+      }
+      .card {
+        max-width: 380px; width: 100%; text-align: center;
+        background: #fbf9f4; border: 1px solid rgba(20, 17, 14, 0.12);
+        border-radius: 16px; padding: 32px 24px;
+      }
+      h1 { margin: 0 0 8px; font-size: 20px; font-family: 'Source Serif 4', ui-serif, Georgia, serif; }
+      p { margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: rgba(20, 17, 14, 0.7); }
+      button {
+        appearance: none; border: 1px solid #14110e; background: #14110e; color: #f6f2ea;
+        font: inherit; font-weight: 600; font-size: 14px; height: 40px; padding: 0 20px;
+        border-radius: 8px; cursor: pointer;
+      }
+      .dot { width: 40px; height: 40px; margin: 0 auto 16px; border-radius: 999px; background: #b5651e; opacity: 0.9; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="dot"></div>
+      <h1>Mất kết nối mạng</h1>
+      <p>Ứng dụng cần mạng để tải giáo án và tiến độ mới nhất. Kiểm tra Wi-Fi hoặc 4G rồi thử lại nhé.</p>
+      <button onclick="location.reload()">Thử lại</button>
+    </div>
+  </body>
+</html>

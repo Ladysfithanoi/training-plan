@@ -60,7 +60,13 @@ export async function proxy(request: NextRequest) {
     // Landing page shown to a trial account whose window has ended.
     path.startsWith('/trial-expired') ||
     path.startsWith('/_next') ||
-    path.startsWith('/favicon')
+    path.startsWith('/favicon') ||
+    // PWA (cài app vào màn hình chính). Trình duyệt tải manifest và service
+    // worker BẰNG REQUEST RIÊNG, không kèm cookie phiên trong mọi trường hợp —
+    // để nhánh 401/redirect bên dưới chặn thì app vĩnh viễn "không cài được".
+    path === '/manifest.webmanifest' ||
+    path === '/sw.js' ||
+    path === '/offline.html'
 
   // Unauthenticated access to a protected path.
   if (!user && !isPublicPath) {
