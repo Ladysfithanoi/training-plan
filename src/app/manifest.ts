@@ -12,8 +12,10 @@ import type { MetadataRoute } from 'next'
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Kế hoạch Tập luyện',
-    short_name: 'Tập luyện',
+    // Tên hiện dưới icon sau khi cài: để trùng nhau + trùng apple-mobile-web-app-title
+    // trong src/app/layout.tsx, để Android và iOS cùng hiện một tên.
+    name: 'Training Plan',
+    short_name: 'Training Plan',
     description: 'Hệ thống phân kỳ tập luyện và theo dõi tiến độ chuyên nghiệp.',
     // Mở thẳng vào trang chính; chưa đăng nhập thì proxy tự đưa về /login.
     start_url: '/dashboard',

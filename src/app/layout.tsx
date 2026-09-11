@@ -41,7 +41,8 @@ export const metadata: Metadata = {
   // icon lấy từ `title` ở đây. Xem thêm src/app/manifest.ts.
   appleWebApp: {
     capable: true,
-    title: 'Tập luyện',
+    // Giữ trùng name/short_name trong src/app/manifest.ts.
+    title: 'Training Plan',
     statusBarStyle: 'default',
   },
 }
