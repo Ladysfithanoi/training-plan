@@ -1,6 +1,17 @@
-import { createClient, createAdminClient } from '@/lib/supabase/server'
-import { freshTrialWindow } from '@/lib/trial'
+import { createClient } from '@/lib/supabase/server'
+import { startTrialClockIfPending } from '@/lib/trial.server'
 
+/**
+ * Server-side email+password sign-in.
+ *
+ * NOTE: the app's own login form does NOT use this route — it signs in with the
+ * browser Supabase client (see (auth)/login/_components/LoginForm.tsx). This
+ * route exists for non-browser callers. Because of that, the trial (Trải
+ * nghiệm) 5-hour clock is NOT started here: the authoritative place is
+ * `src/proxy.ts`, which runs on every authenticated request regardless of how
+ * the session was obtained. The call below is only so this path behaves the
+ * same as the form — it is a no-op once the proxy has already started it.
+ */
 export async function POST(request: Request) {
   const { email, password } = await request.json()
 
@@ -15,26 +26,14 @@ export async function POST(request: Request) {
     return Response.json({ error: error.message }, { status: 401 })
   }
 
-  // ── Start the trial (Trải nghiệm) clock on the FIRST login ──────────────────
-  // Test accounts are created "pending": trial_active = true but
-  // trial_expires_at = null. The 5-hour window begins counting only from this
-  // first sign-in — set it once and never reset it on later logins, so the
-  // countdown keeps running continuously across sessions. Non-fatal on failure:
-  // login still succeeds and the proxy gate keeps protecting access.
+  // Non-fatal: login still succeeds and the proxy gate keeps protecting access.
   try {
-    const admin = createAdminClient()
-    const { data: profile } = await admin
+    const { data: profile } = await supabase
       .from('profiles')
       .select('role, trial_active, trial_expires_at')
       .eq('id', data.user.id)
       .single()
-    if (
-      profile?.role === 'trial' &&
-      profile.trial_active !== false &&
-      !profile.trial_expires_at
-    ) {
-      await admin.from('profiles').update(freshTrialWindow()).eq('id', data.user.id)
-    }
+    if (profile) await startTrialClockIfPending(data.user.id, profile)
   } catch {
     /* trial columns missing or update failed — ignore, login still valid */
   }

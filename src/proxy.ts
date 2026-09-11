@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { trialIsActive } from '@/lib/trial'
+import { startTrialClockIfPending } from '@/lib/trial.server'
 
 /**
  * Next.js 16 Proxy (formerly Middleware).
@@ -119,7 +120,15 @@ export async function proxy(request: NextRequest) {
         .eq('id', user.id)
         .single()
 
-      if (trial && !trialIsActive(trial)) {
+      // Start the 5-hour clock on the account's FIRST authenticated request.
+      // This must live here, not in a login handler: the login form signs in
+      // with the BROWSER Supabase client, so no server route runs on sign-in —
+      // the window would never start, the account would read "Chờ đăng nhập"
+      // forever and never expire. The proxy is the single place every way into
+      // the app passes through (fresh login, restored session, PWA relaunch).
+      const gate = trial ? await startTrialClockIfPending(user.id, trial) : trial
+
+      if (gate && !trialIsActive(gate)) {
         if (path.startsWith('/api/')) {
           return NextResponse.json(
             { error: 'Phiên trải nghiệm đã kết thúc. Vui lòng liên hệ quản trị viên để được kích hoạt lại.' },

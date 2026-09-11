@@ -22,7 +22,7 @@ export type TrialState = 'pending' | 'active' | 'expired' | 'disabled'
  *   • 'disabled' — admin switched it off (trial_active === false)
  *   • 'pending'  — switched on but the 5-hour clock hasn't started yet. The
  *                  window only begins counting from the account's FIRST login
- *                  (set in /api/auth/login), so a created-but-never-logged-in
+ *                  (started by the proxy), so a created-but-never-logged-in
  *                  test account is allowed in until then.
  *   • 'expired'  — the 5-hour window has elapsed
  *   • 'active'   — switched on AND still within the window
@@ -43,7 +43,8 @@ export function trialIsActive(p: TrialFields): boolean {
 /**
  * Trial fields for a freshly created test account that hasn't logged in yet:
  * switched ON, but the 5-hour clock is NOT started. The window begins counting
- * only from the first login (see /api/auth/login), so admins can prepare a test
+ * only from the first login (started in src/proxy.ts, the one place every way
+ * into the app passes through), so admins can prepare a test
  * account in advance without burning the window before the tester arrives.
  */
 export function pendingTrialWindow(): { trial_active: true; trial_expires_at: null } {
@@ -52,7 +53,8 @@ export function pendingTrialWindow(): { trial_active: true; trial_expires_at: nu
 
 /**
  * Build the trial fields that START the 5-hour clock now (now + 5h, switched on).
- * Used on the account's first login and by the admin "kích hoạt lại" action.
+ * Used by the proxy on the account's first authenticated request and by the
+ * admin "Kích hoạt 5h" action.
  */
 export function freshTrialWindow(): { trial_active: true; trial_expires_at: string } {
   return {

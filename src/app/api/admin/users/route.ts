@@ -110,7 +110,7 @@ export async function POST(request: Request) {
 
   // Trial accounts start switched ON but with the 5-hour clock NOT yet running.
   // The window begins counting from the tester's FIRST login (see
-  // /api/auth/login), so preparing the account in advance doesn't burn the time.
+  // src/proxy.ts), so preparing the account in advance doesn't burn the time.
   const trialFields = role === 'trial' ? pendingTrialWindow() : {}
 
   // ── Welcome-email plan ─────────────────────────────────────────────────────
