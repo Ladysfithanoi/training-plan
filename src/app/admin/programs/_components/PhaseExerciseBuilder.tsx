@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -19,6 +19,7 @@ import {
   generateDefaultDays,
   filterPatternsByDay,
   availableDayTypes,
+  buildDayBatch,
   SPLIT_TYPE_OPTIONS,
   DAY_TYPE_LABELS,
   PATTERN_NAMES_BY_DAY,
@@ -52,6 +53,13 @@ const LOADING_STYLE_OPTIONS = [
     desc: 'Xoay vòng giữa các bài trong cùng nhóm. Nhập mã tùy chỉnh: A1, A2, B1, B2…',
   },
 ]
+
+/**
+ * Trần số buổi thêm được cho MỖI loại trong một lượt "Thêm ngày".
+ * Đủ rộng cho mọi giáo án thực tế (tối đa vài vòng split/tuần) mà vẫn chặn được
+ * trường hợp bấm nhầm giữ nút rồi sinh ra hàng trăm buổi trống.
+ */
+const MAX_NEW_DAYS_PER_TYPE = 14
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -436,10 +444,21 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   const renameRef                         = useRef<HTMLInputElement>(null)
   // Panel thêm bài tập — dùng để tự cuộn xuống khi mở
   const addPanelRef                       = useRef<HTMLDivElement>(null)
-  const [addingDay, setAddingDay]         = useState(false)
-  const [newDayType, setNewDayType]       = useState<DayType>('push')
-  // Custom session name — only used when newDayType === 'other' (buổi "Khác")
-  const [newDayLabel, setNewDayLabel]     = useState('')
+  // Bảng "Thêm ngày": coach chọn SỐ BUỔI cho từng loại rồi thêm tất cả một lượt.
+  const [addingDay, setAddingDay]           = useState(false)
+  const [newDayCounts, setNewDayCounts]     = useState<Partial<Record<DayType, number>>>({})
+  // Tên tự đặt cho từng buổi "Khác" được yêu cầu, theo thứ tự. Để trống = tự sinh.
+  const [newOtherLabels, setNewOtherLabels] = useState<string[]>([])
+
+  // Các ngày sắp được thêm theo cấu hình hiện tại của bảng — dùng cho cả dòng xem
+  // trước lẫn lúc bấm "Thêm", nên nhãn hiện ra đúng bằng nhãn được tạo. Ghi nhớ
+  // theo cấu hình để id không đổi giữa các lần render.
+  const pendingNewDays = useMemo(
+    () => (splitType
+      ? buildDayBatch(splitDays, newDayCounts, availableDayTypes(splitType), newOtherLabels)
+      : []),
+    [splitType, splitDays, newDayCounts, newOtherLabels],
+  )
 
   // Save states
   const [saveStatus, setSaveStatus]   = useState<SaveStatus>('idle') // explicit button
@@ -1086,27 +1105,61 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   }
 
   // ── Day CRUD ──────────────────────────────────────────────────────────────────
-  function handleAddDay() {
-    if (!splitType) return
-    // Buổi "Khác": dùng tên tự do coach nhập (fallback "Khác N" nếu để trống).
-    // Các loại buổi khác: nhãn tự sinh theo thứ tự (vd "Đẩy 2").
-    const label =
-      newDayType === 'other'
-        ? (newDayLabel.trim() ||
-            `${DAY_TYPE_LABELS.other} ${splitDays.filter(d => d.type === 'other').length + 1}`)
-        : `${DAY_TYPE_LABELS[newDayType]} ${
-            splitDays.filter(d => d.type === newDayType).length + 1
-          }`
-    const newDay: SplitDay = {
-      id:    crypto.randomUUID(),
-      type:  newDayType,
-      label,
-    }
-    const updated = [...splitDays, newDay]
-    setSplitDays(updated)
-    setActiveDayId(newDay.id)
+  function openAddDays() {
+    setNewDayCounts({})
+    setNewOtherLabels([])
+    setAddingDay(true)
+  }
+
+  function closeAddDays() {
     setAddingDay(false)
-    setNewDayLabel('')
+    setNewDayCounts({})
+    setNewOtherLabels([])
+  }
+
+  /** +1 / −1 số buổi của một loại trong bảng thêm ngày (giới hạn 0…MAX_NEW_DAYS). */
+  function bumpNewDayCount(type: DayType, delta: number) {
+    setNewDayCounts(prev => ({
+      ...prev,
+      [type]: Math.min(MAX_NEW_DAYS_PER_TYPE, Math.max(0, (prev[type] ?? 0) + delta)),
+    }))
+  }
+
+  /**
+   * Thêm trọn một vòng split (mỗi loại buổi chính +1) — lối tắt cho các giáo án
+   * chạy nhiều vòng mỗi tuần, vd PPL 2 vòng: bấm 2 lần là đủ 6 buổi.
+   * Buổi "Khác" không nằm trong vòng vì nó là buổi tự do, không thuộc chu kỳ.
+   */
+  function addSplitCycle() {
+    if (!splitType) return
+    setNewDayCounts(prev => {
+      const next = { ...prev }
+      for (const t of availableDayTypes(splitType)) {
+        if (t === 'other') continue
+        next[t] = Math.min(MAX_NEW_DAYS_PER_TYPE, (next[t] ?? 0) + 1)
+      }
+      return next
+    })
+  }
+
+  /** Ghi tên coach nhập cho buổi "Khác" thứ idx của lô sắp thêm. */
+  function setNewOtherLabelAt(idx: number, value: string) {
+    setNewOtherLabels(prev => {
+      const next = prev.slice()
+      next[idx] = value
+      return next
+    })
+  }
+
+  /**
+   * Thêm toàn bộ các ngày đã chọn vào split một lượt. Vẫn là BẢN NHÁP như trước:
+   * chỉ vào DB khi coach bấm "Lưu cấu hình giáo án".
+   */
+  function handleAddDays() {
+    if (!splitType || pendingNewDays.length === 0) return
+    setSplitDays([...splitDays, ...pendingNewDays])
+    setActiveDayId(pendingNewDays[0].id)
+    closeAddDays()
   }
 
   function startRenameDay(day: SplitDay) {
@@ -2605,59 +2658,139 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
                       </div>
                     ))}
 
-                    {/* Add day button */}
-                    {!addingDay ? (
-                      <button
-                        onClick={() => {
-                          const types = availableDayTypes(splitType)
-                          setNewDayType(types[0])
-                          setNewDayLabel('')
-                          setAddingDay(true)
-                        }}
-                        className="rounded-lg border border-dashed border-ink/20 px-3 py-1.5 text-xs text-ink/40 hover:border-ink/35 hover:text-ink/60 transition-colors font-medium"
-                      >
-                        + Thêm ngày
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <select
-                          value={newDayType}
-                          onChange={e => {
-                            setNewDayType(e.target.value as DayType)
-                            setNewDayLabel('')
-                          }}
-                          className="rounded border border-ink/20 bg-white px-2 py-1 text-xs text-ink focus:border-amber outline-none"
-                        >
-                          {availableDayTypes(splitType).map(t => (
-                            <option key={t} value={t}>{DAY_TYPE_LABELS[t]}</option>
-                          ))}
-                        </select>
-                        {/* Buổi "Khác" → cho phép coach nhập tên buổi tự do */}
-                        {newDayType === 'other' && (
-                          <input
-                            type="text"
-                            value={newDayLabel}
-                            onChange={e => setNewDayLabel(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter')  handleAddDay()
-                              if (e.key === 'Escape') { setAddingDay(false); setNewDayLabel('') }
-                            }}
-                            placeholder="Tên buổi tập…"
-                            autoFocus
-                            className="rounded border border-amber px-2 py-1 text-xs text-ink focus:outline-none w-36"
-                          />
-                        )}
-                        <button onClick={handleAddDay}
-                          className="text-xs text-herb font-semibold px-2 py-1 rounded hover:bg-herb/10">
-                          Thêm
-                        </button>
-                        <button onClick={() => { setAddingDay(false); setNewDayLabel('') }}
-                          className="text-xs text-ink/40 px-1.5 py-1 rounded hover:bg-ink/5">
-                          Huỷ
-                        </button>
-                      </div>
-                    )}
+                    {/* Add day button — mở bảng thêm nhiều ngày một lượt */}
+                    <button
+                      onClick={() => (addingDay ? closeAddDays() : openAddDays())}
+                      className={cn(
+                        'rounded-lg border border-dashed px-3 py-1.5 text-xs font-medium transition-colors',
+                        addingDay
+                          ? 'border-amber/60 bg-amber/10 text-amber'
+                          : 'border-ink/20 text-ink/40 hover:border-ink/35 hover:text-ink/60',
+                      )}
+                    >
+                      + Thêm ngày
+                    </button>
                   </div>
+
+                  {/* ── Bảng thêm nhiều ngày tập cùng lúc ── */}
+                  {addingDay && (
+                    <div className="mt-3 rounded-xl border border-amber/25 bg-amber/[0.04] px-4 py-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-ink">
+                          Thêm nhiều ngày tập cùng lúc
+                        </p>
+                        {/* Lối tắt: +1 vòng split (bỏ qua buổi "Khác") */}
+                        {availableDayTypes(splitType).some(t => t !== 'other') && (
+                          <button
+                            onClick={addSplitCycle}
+                            title="Mỗi loại buổi chính +1 — bấm 2 lần cho giáo án 2 vòng/tuần"
+                            className="rounded-lg border border-amber/35 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber hover:bg-amber/10 transition-colors"
+                          >
+                            + 1 vòng split
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Bộ đếm số buổi theo từng loại */}
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {availableDayTypes(splitType).map(t => {
+                          const count = newDayCounts[t] ?? 0
+                          return (
+                            <div
+                              key={t}
+                              className={cn(
+                                'flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 transition-colors',
+                                count > 0 ? 'border-amber/45' : 'border-ink/10',
+                              )}
+                            >
+                              <span className="flex-1 truncate text-xs font-medium text-ink/70">
+                                {DAY_TYPE_LABELS[t]}
+                              </span>
+                              <button
+                                onClick={() => bumpNewDayCount(t, -1)}
+                                disabled={count === 0}
+                                title="Bớt 1 buổi"
+                                className="h-6 w-6 rounded flex items-center justify-center text-sm font-bold text-ink/45 hover:bg-ink/8 hover:text-ink disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                              >
+                                −
+                              </button>
+                              <span className={cn(
+                                'w-5 text-center text-xs font-bold tabular-nums',
+                                count > 0 ? 'text-amber' : 'text-ink/25',
+                              )}>
+                                {count}
+                              </span>
+                              <button
+                                onClick={() => bumpNewDayCount(t, 1)}
+                                disabled={count >= MAX_NEW_DAYS_PER_TYPE}
+                                title="Thêm 1 buổi"
+                                className="h-6 w-6 rounded flex items-center justify-center text-sm font-bold text-ink/45 hover:bg-ink/8 hover:text-ink disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                              >
+                                +
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Buổi "Khác" → cho phép coach nhập tên buổi tự do, mỗi buổi một ô */}
+                      {(newDayCounts.other ?? 0) > 0 && (
+                        <div className="mt-2.5 space-y-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink/35">
+                            Tên các buổi “Khác” — để trống sẽ tự đặt tên
+                          </p>
+                          {Array.from({ length: newDayCounts.other ?? 0 }).map((_, i) => (
+                            <input
+                              key={i}
+                              type="text"
+                              value={newOtherLabels[i] ?? ''}
+                              onChange={e => setNewOtherLabelAt(i, e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter')  handleAddDays()
+                                if (e.key === 'Escape') closeAddDays()
+                              }}
+                              autoFocus={i === 0}
+                              placeholder={`Tên buổi ${i + 1}…`}
+                              className="w-full rounded border border-ink/15 bg-white px-2 py-1 text-xs text-ink focus:border-amber outline-none"
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Xem trước + hành động */}
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                        <p className="min-w-0 text-[11px] leading-relaxed text-ink/50">
+                          {pendingNewDays.length === 0 ? (
+                            'Chọn số buổi cho từng loại rồi bấm Thêm.'
+                          ) : (
+                            <>
+                              Sẽ thêm{' '}
+                              <span className="font-semibold text-ink/75">{pendingNewDays.length}</span>
+                              {' '}ngày:{' '}
+                              <span className="text-ink/70">
+                                {pendingNewDays.map(d => d.label).join(' · ')}
+                              </span>
+                            </>
+                          )}
+                        </p>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            onClick={handleAddDays}
+                            disabled={pendingNewDays.length === 0}
+                            className="rounded px-2 py-1 text-xs font-semibold text-herb hover:bg-herb/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {pendingNewDays.length > 0 ? `Thêm ${pendingNewDays.length} ngày` : 'Thêm'}
+                          </button>
+                          <button
+                            onClick={closeAddDays}
+                            className="rounded px-1.5 py-1 text-xs text-ink/40 hover:bg-ink/5 transition-colors"
+                          >
+                            Huỷ
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Active day description */}
                   {activeDay && splitType && (

@@ -164,3 +164,54 @@ export const SPLIT_TYPE_OPTIONS = Object.values(SPLIT_CONFIGS).map(s => ({
   value: s.type as string,
   label: s.label,
 }))
+
+/**
+ * Build a batch of new day slots in one go — "thêm nhiều ngày tập cùng lúc".
+ *
+ * `counts` maps a DayType to how many slots of that type to create. Slots are
+ * emitted ROUND-ROBIN following `order` (one of each remaining type per vòng)
+ * instead of grouped by type, so asking for 2× Push/Pull/Legs produces the
+ * natural 2-vòng PPL sequence — Đẩy · Kéo · Chân · Đẩy · Kéo · Chân — rather
+ * than Đẩy · Đẩy · Kéo · Kéo · Chân · Chân.
+ *
+ * Labels continue the existing per-type numbering, counting `existingDays` plus
+ * the earlier slots of this same batch. `otherLabels` supplies the coach's
+ * free-form names for 'other' days in the order they appear; a blank entry
+ * falls back to the generated "Khác N".
+ */
+export function buildDayBatch(
+  existingDays: SplitDay[],
+  counts: Partial<Record<DayType, number>>,
+  order: DayType[],
+  otherLabels: string[] = [],
+): SplitDay[] {
+  const remaining = new Map<DayType, number>(
+    order.map(t => [t, Math.max(0, Math.floor(counts[t] ?? 0))]),
+  )
+
+  // Running per-type tally so labels keep counting up across the whole batch.
+  const tally: Partial<Record<DayType, number>> = {}
+  for (const d of existingDays) tally[d.type] = (tally[d.type] ?? 0) + 1
+
+  const out: SplitDay[] = []
+  let otherIdx = 0
+
+  while ([...remaining.values()].some(n => n > 0)) {
+    for (const type of order) {
+      const left = remaining.get(type) ?? 0
+      if (left <= 0) continue
+      remaining.set(type, left - 1)
+
+      const n      = (tally[type] = (tally[type] ?? 0) + 1)
+      const custom = type === 'other' ? (otherLabels[otherIdx++] ?? '').trim() : ''
+
+      out.push({
+        id:    crypto.randomUUID(),
+        type,
+        label: custom || `${DAY_TYPE_LABELS[type]} ${n}`,
+      })
+    }
+  }
+
+  return out
+}
