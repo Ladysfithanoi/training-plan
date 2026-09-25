@@ -3,12 +3,15 @@ import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { LiveWorkoutFeed } from './_components/LiveWorkoutFeed'
+import { ExportDataCard } from './_components/ExportDataCard'
+import { getProfile } from '@/lib/auth'
 
 export const metadata = { title: 'Bảng điều khiển HLV' }
 export const dynamic = 'force-dynamic'
 
 export default async function AdminPage() {
   const supabase = await createClient()
+  const profile = await getProfile()
 
   const [
     { count: userCount },
@@ -88,6 +91,14 @@ export default async function AdminPage() {
           ))}
         </div>
       </div>
+
+      {/* Sao lưu dữ liệu — chỉ Quản trị viên (file chứa dữ liệu của mọi HLV) */}
+      {profile?.role === 'admin' && (
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink/50 mb-4">Sao lưu dữ liệu</h2>
+          <ExportDataCard />
+        </div>
+      )}
 
       {/* Live workout feed */}
       <div>
