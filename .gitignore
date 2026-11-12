@@ -44,3 +44,7 @@ next-env.d.ts
 
 # graphify knowledge graph (rebuilt locally with `graphify update .`)
 /graphify-out/
+
+# Kept local only: the working copy may hold real Gemini API keys.
+# The table definition is in git history (commit 0e3e5f0) and already applied in Supabase.
+/supabase/migrations/015_add_gemini_api_keys.sql
