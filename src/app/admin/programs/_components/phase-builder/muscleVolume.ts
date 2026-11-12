@@ -1,3 +1,5 @@
+import type { PhaseExerciseRow } from './shared'
+
 // Weekly / per-session volume helpers for the phase exercise builder.
 
 /**
@@ -157,4 +159,28 @@ export function getMuscleContributions(
 
   // ── Unrecognised — keep raw pattern name so no volume silently disappears ─
   return { [patternName.length > 0 ? patternName : 'Chưa phân loại']: 1.0 }
+}
+
+/**
+ * Fractional set credit per anatomical muscle group for a list of prescription
+ * rows (primary driver 1.0×, secondary driver 0.5× — Eric Helms / RP), rounded
+ * to one decimal and sorted from most to least volume.
+ *
+ * `setMultiplier` scales each row's target_sets: 1 for a single session or a
+ * split-configured week, frequency_per_week when the phase has no split.
+ */
+export function sumMuscleVolume(rows: PhaseExerciseRow[], setMultiplier: number) {
+  const map = new Map<string, number>()
+  for (const pe of rows) {
+    const patternName  = pe.exercise.movement_pattern?.name ?? ''
+    const exerciseName = pe.exercise.name ?? ''
+    const sessionSets  = (pe.target_sets ?? 0) * setMultiplier
+    const contributions = getMuscleContributions(patternName, exerciseName)
+    for (const [muscle, fraction] of Object.entries(contributions)) {
+      map.set(muscle, (map.get(muscle) ?? 0) + sessionSets * fraction)
+    }
+  }
+  return Array.from(map.entries())
+    .map(([name, sets]) => ({ name, sets: Math.round(sets * 10) / 10 }))
+    .sort((a, b) => b.sets - a.sets)
 }

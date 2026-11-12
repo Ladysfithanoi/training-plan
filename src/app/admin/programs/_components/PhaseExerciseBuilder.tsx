@@ -2,39 +2,40 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
-import { Select } from '@/components/ui/Select'
 import { Card, CardBody } from '@/components/ui/Card'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
 import { ImportScheduleExcelModal } from './ImportScheduleExcelModal'
 import type { ImportResult } from './ImportScheduleExcelModal'
 import { ImportPlanExcelModal } from './ImportPlanExcelModal'
 import type { PlanImportResult, ProgramImportResult, WeekImportResult } from './ImportPlanExcelModal'
-import { AddDaysPanel } from './phase-builder/AddDaysPanel'
+import { AddExercisePanel } from './phase-builder/AddExercisePanel'
 import { AddPhaseModal } from './phase-builder/AddPhaseModal'
 import { CrossMesoCopyPanel } from './phase-builder/CrossMesoCopyPanel'
 import { EditExerciseModal } from './phase-builder/EditExerciseModal'
 import { ExerciseTable } from './phase-builder/ExerciseTable'
+import { WeekImportBanner, ProgramImportBanner, DayImportBanner } from './phase-builder/ImportBanners'
+import { OrphanPanel } from './phase-builder/OrphanPanel'
 import { PhaseParamsModal } from './phase-builder/PhaseParamsModal'
-import type { PhaseParamsPatch } from './phase-builder/PhaseParamsModal'
+import { PhaseTabs } from './phase-builder/PhaseTabs'
+import { SplitConfigCard } from './phase-builder/SplitConfigCard'
 import { WeeklyVolumeSummary, SessionOverloadWarning } from './phase-builder/VolumePanels'
-import { getMuscleContributions, SESSION_SET_CAP } from './phase-builder/muscleVolume'
+import { WeekScopeBar } from './phase-builder/WeekScopeBar'
+import { sumMuscleVolume, SESSION_SET_CAP } from './phase-builder/muscleVolume'
+import { useAddExerciseForm } from './phase-builder/useAddExerciseForm'
 import {
-  LOADING_STYLE_OPTIONS,
   NUMERIC_LIMITS,
+  commitDaysBody,
   computeHorizontalLabel,
-  orderBadgeClass,
   parseNumericField,
   splitSig,
 } from './phase-builder/shared'
 import type { BlockWithPhases, NumericField, PhaseExerciseRow, SaveStatus } from './phase-builder/shared'
-import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import {
   recommendSplit,
   getSplitConfig,
   generateDefaultDays,
   filterPatternsByDay,
-  SPLIT_TYPE_OPTIONS,
   DAY_TYPE_LABELS,
   PATTERN_NAMES_BY_DAY,
 } from '@/lib/trainingSplit'
@@ -172,16 +173,25 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
 
   // ── Add exercise form ────────────────────────────────────────────────────────
   const [addOpen, setAddOpen]             = useState(false)
-  const [filterPattern, setFilterPattern] = useState('')
-  const [selectedExercise, setSelectedExercise] = useState('')
-  const [targetSets, setTargetSets]       = useState('3')
-  const [targetRepMin, setTargetRepMin]   = useState('8')
-  const [targetRepMax, setTargetRepMax]   = useState('12')
-  const [rirTarget, setRirTarget]         = useState('2')
-  const [loadingStyle, setLoadingStyle]   = useState<'horizontal' | 'vertical'>('horizontal')
-  const [orderLabel, setOrderLabel]       = useState('')   // only used for vertical
-  const [addError, setAddError]           = useState<string | null>(null)
-  const [adding, setAdding]               = useState(false)
+  // The field state lives in useAddExerciseForm. The values and setters are
+  // pulled out here because handleAdd reads them and the block / phase / day
+  // effects below reset some of them.
+  const addForm = useAddExerciseForm()
+  const {
+    filterPattern, setFilterPattern,
+    selectedExercise, setSelectedExercise,
+    targetSets, setTargetSets,
+    targetRepMin, setTargetRepMin,
+    targetRepMax, setTargetRepMax,
+    rirTarget, setRirTarget,
+    loadingStyle,
+    orderLabel, setOrderLabel,
+    setAddError, setAdding,
+    isAmrap, setIsAmrap,
+    target1rmPct, setTarget1rmPct,
+    isWarmup, setIsWarmup,
+    exerciseNotes, setExerciseNotes,
+  } = addForm
 
   // ── Meso (phase) CRUD ────────────────────────────────────────────────────────
   // Coaches can add blank mesos to any block, rename them, or delete them without
@@ -192,18 +202,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   const [renamingPhaseId, setRenamingPhaseId]   = useState<string | null>(null)
   const [renamePhaseValue, setRenamePhaseValue] = useState('')
   const renamingPhaseRef                        = useRef<HTMLInputElement>(null)
-
-  // ── Migration 006: AMRAP & %1RM target ──────────────────────────────────────
-  /** When true the final working set is programmed as AMRAP to RPE 10. */
-  const [isAmrap, setIsAmrap]                 = useState(false)
-  /** Explicit load prescription as integer % of 1RM (e.g. 85). Empty = off. */
-  const [target1rmPct, setTarget1rmPct]       = useState('')
-  // ── Migration 012: warmup flag ──────────────────────────────────────────────
-  /** When true the exercise is marked as a warm-up ("Bài khởi động"). */
-  const [isWarmup, setIsWarmup]               = useState(false)
-  // ── Coach note shown to the athlete ─────────────────────────────────────────
-  /** Free-text prescription note (phase_exercises.notes) visible to the athlete. */
-  const [exerciseNotes, setExerciseNotes]     = useState('')
 
   // ── Phase week-type (migration 006) ──────────────────────────────────────────
   /** Training stimulus character for the currently selected phase. */
@@ -356,22 +354,10 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
    *                   exercises recruit multiple muscle groups).
    * maxMuscleSets   — largest single-muscle total; drives the % width of bars.
    */
-  const weeklyVolumeByMuscle = (() => {
-    const freqMul = splitType ? 1 : (selectedPhase?.frequency_per_week ?? 1)
-    const map = new Map<string, number>()
-    for (const pe of scopedExercises) {
-      const patternName  = pe.exercise.movement_pattern?.name ?? ''
-      const exerciseName = pe.exercise.name ?? ''
-      const sessionSets  = (pe.target_sets ?? 0) * freqMul
-      const contributions = getMuscleContributions(patternName, exerciseName)
-      for (const [muscle, fraction] of Object.entries(contributions)) {
-        map.set(muscle, (map.get(muscle) ?? 0) + sessionSets * fraction)
-      }
-    }
-    return Array.from(map.entries())
-      .map(([name, sets]) => ({ name, sets: Math.round(sets * 10) / 10 }))
-      .sort((a, b) => b.sets - a.sets)
-  })()
+  const weeklyVolumeByMuscle = sumMuscleVolume(
+    scopedExercises,
+    splitType ? 1 : (selectedPhase?.frequency_per_week ?? 1),
+  )
 
   const rawWeeklySets   = scopedExercises.reduce(
     (sum, pe) => sum + (pe.target_sets ?? 0) * (splitType ? 1 : (selectedPhase?.frequency_per_week ?? 1)),
@@ -396,21 +382,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
    *   • No split         → the phase is one repeated session; scopedExercises is
    *     that single session, also summed directly.
    */
-  const sessionVolumeByMuscle = (() => {
-    const map = new Map<string, number>()
-    for (const pe of visibleExercises) {
-      const patternName   = pe.exercise.movement_pattern?.name ?? ''
-      const exerciseName  = pe.exercise.name ?? ''
-      const sessionSets   = pe.target_sets ?? 0
-      const contributions = getMuscleContributions(patternName, exerciseName)
-      for (const [muscle, fraction] of Object.entries(contributions)) {
-        map.set(muscle, (map.get(muscle) ?? 0) + sessionSets * fraction)
-      }
-    }
-    return Array.from(map.entries())
-      .map(([name, sets]) => ({ name, sets: Math.round(sets * 10) / 10 }))
-      .sort((a, b) => b.sets - a.sets)
-  })()
+  const sessionVolumeByMuscle = sumMuscleVolume(visibleExercises, 1)
   const overloadedMuscles = sessionVolumeByMuscle.filter(m => m.sets > SESSION_SET_CAP)
 
   /**
@@ -574,7 +546,9 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     setSelectedExercise('')
     setOrderLabel('')
     setEditingOLId(null)
-  }, [activeDayId])
+    // The three setters come from useAddExerciseForm; they are plain useState
+    // setters (stable), listed only because the linter can't see that.
+  }, [activeDayId, setFilterPattern, setSelectedExercise, setOrderLabel])
 
   // ── Data loaders ─────────────────────────────────────────────────────────────
   async function loadPhaseExercises(phaseId: string) {
@@ -613,12 +587,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     // Keep the in-memory phase in sync so switching meso away and back doesn't
     // re-read the stale page-load week_type. Same root cause as the split-config
     // sync in handleSaveConfig.
-    updateBlocks(prev => prev.map(b =>
-      b.id === selectedBlockId
-        ? { ...b, phases: (b.phases ?? []).map(p =>
-            p.id === selectedPhaseId ? { ...p, week_type: val } : p) }
-        : b,
-    ))
+    patchPhase(selectedPhaseId, { week_type: val })
 
     // AMRAP is a hypertrophy-only technique → clear it when entering strength.
     // %1RM is now an always-available optional field, so it is NOT cleared on
@@ -668,29 +637,10 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       // Explicitly serialise each day to { id, type, label } — the exact shape
       // stored in phases.split_days JSONB. Falls back to [] when state is empty
       // so Supabase never receives null or undefined for the NOT NULL column.
-      const splitDaysPayload = Array.isArray(splitDays)
-        ? splitDays.map(d => ({ id: d.id, type: d.type, label: d.label }))
-        : []
-
       const res = await fetch(`/api/phases/${selectedPhaseId}/commit-days`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          split_type: splitType,
-          split_days: splitDaysPayload,
-          // Send only the fields the endpoint needs — avoids shipping large
-          // exercise / movement-pattern join objects over the wire.
-          // Per-week (migration 011): day_exercises mirrors the BASE day structure,
-          // so only base rows are committed; week overrides share the same days.
-          phase_exercises: phaseExercises
-            .filter(pe => (pe.week_number ?? null) === null)
-            .map(pe => ({
-              id:            pe.id,
-              day_id:        pe.day_id        ?? null,
-              order_label:   pe.order_label   ?? null,
-              loading_style: pe.loading_style ?? 'horizontal',
-            })),
-        }),
+        body:    commitDaysBody(splitType, splitDays, phaseExercises),
       })
 
       if (!res.ok) {
@@ -704,14 +654,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       // this the in-memory phase keeps its page-load split_type/split_days, so
       // switching to another meso and back re-reads the stale phase → splitType
       // resolves to null → the table dumps every exercise into one flat list.
-      updateBlocks(prev => prev.map(b =>
-        b.id === selectedBlockId
-          ? { ...b, phases: (b.phases ?? []).map(p =>
-              p.id === selectedPhaseId
-                ? { ...p, split_type: splitType, split_days: splitDays }
-                : p) }
-          : b,
-      ))
+      patchPhase(selectedPhaseId, { split_type: splitType, split_days: splitDays })
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2500)
     } catch (err) {
@@ -939,11 +882,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     setRenamingPhaseId(null)
 
     // Optimistic update
-    updateBlocks(prev => prev.map(b =>
-      b.id === selectedBlockId
-        ? { ...b, phases: (b.phases ?? []).map(p => p.id === phaseId ? { ...p, name: newName } : p) }
-        : b,
-    ))
+    patchPhase(phaseId, { name: newName })
 
     await fetch(`/api/phases/${phaseId}`, {
       method:  'PATCH',
@@ -953,8 +892,12 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   }
 
   // ── Edit phase parameters ────────────────────────────────────────────────────
-  /** Optimistic local update so the info bar + timeline reflect changes at once. */
-  function applyPhaseParams(phaseId: string, patch: PhaseParamsPatch) {
+  /**
+   * Merge `patch` into one phase of the active block, in both the local mirror
+   * and the shared parent state, so the info bar + timeline (section 1) reflect
+   * the change at once.
+   */
+  function patchPhase(phaseId: string, patch: Partial<Phase>) {
     updateBlocks(prev => prev.map(b =>
       b.id === selectedBlockId
         ? { ...b, phases: (b.phases ?? []).map(p => p.id === phaseId ? { ...p, ...patch } : p) }
@@ -1294,11 +1237,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     // rep matrix) redraws with the new week count.
     const phase = result.phase
     if (phase) {
-      updateBlocks(prev => prev.map(b =>
-        b.id === selectedBlockId
-          ? { ...b, phases: (b.phases ?? []).map(p => p.id === selectedPhaseId ? { ...p, ...phase } : p) }
-          : b,
-      ))
+      patchPhase(selectedPhaseId, phase)
     }
 
     setProgramImportSummary(result)
@@ -1306,19 +1245,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     void fetch(`/api/phases/${selectedPhaseId}/commit-days`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        split_type: result.splitType,
-        split_days: result.splitDays.map(d => ({ id: d.id, type: d.type, label: d.label })),
-        // day_exercises mirrors the BASE day structure only (see handleSaveConfig).
-        phase_exercises: result.exercises
-          .filter(pe => (pe.week_number ?? null) === null)
-          .map(pe => ({
-            id:            pe.id,
-            day_id:        pe.day_id        ?? null,
-            order_label:   pe.order_label   ?? null,
-            loading_style: pe.loading_style ?? 'horizontal',
-          })),
-      }),
+      body:    commitDaysBody(result.splitType, result.splitDays, result.exercises),
     })
   }
 
@@ -1360,11 +1287,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
 
     const phase = result.phase
     if (phase) {
-      updateBlocks(prev => prev.map(b =>
-        b.id === selectedBlockId
-          ? { ...b, phases: (b.phases ?? []).map(p => p.id === selectedPhaseId ? { ...p, ...phase } : p) }
-          : b,
-      ))
+      patchPhase(selectedPhaseId, phase)
     }
 
     setWeekImportSummary(result)
@@ -1374,19 +1297,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     void fetch(`/api/phases/${selectedPhaseId}/commit-days`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        split_type: result.splitType,
-        split_days: result.splitDays.map(d => ({ id: d.id, type: d.type, label: d.label })),
-        // day_exercises mirrors the BASE day structure only (see handleSaveConfig).
-        phase_exercises: result.exercises
-          .filter(pe => (pe.week_number ?? null) === null)
-          .map(pe => ({
-            id:            pe.id,
-            day_id:        pe.day_id        ?? null,
-            order_label:   pe.order_label   ?? null,
-            loading_style: pe.loading_style ?? 'horizontal',
-          })),
-      }),
+      body:    commitDaysBody(result.splitType, result.splitDays, result.exercises),
     })
   }
 
@@ -1460,6 +1371,13 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     }
   }
 
+  /** Open the "Nhập từ Excel (tuần & buổi)" modal with both result banners cleared. */
+  function openPlanImport() {
+    setProgramImportSummary(null)
+    setWeekImportSummary(null)
+    setPlanImportOpen(true)
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -1468,114 +1386,21 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       {/* ── Phase (meso) selector + inline CRUD ──────────────────────────── */}
       {/* Block selection is controlled by ProgramsWorkspace (section 1).     */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-ink/50">
-            Giai đoạn — {activeBlock?.name ?? ''}
-          </label>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {phases.sort((a, b) => a.phase_order - b.phase_order).map(phase => (
-            <div key={phase.id} className="flex items-center gap-0.5 group">
-
-              {renamingPhaseId === phase.id ? (
-                /* ── Inline rename ── */
-                <div className="flex items-center gap-1">
-                  <input
-                    ref={renamingPhaseRef}
-                    type="text"
-                    value={renamePhaseValue}
-                    onChange={e => setRenamePhaseValue(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter')  void commitRenamePhase()
-                      if (e.key === 'Escape') setRenamingPhaseId(null)
-                    }}
-                    className="rounded border border-amber px-2 py-1 text-sm font-medium text-ink focus:outline-none w-44"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void commitRenamePhase()}
-                    className="text-xs text-herb font-semibold px-1.5 py-1 rounded hover:bg-herb/10"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRenamingPhaseId(null)}
-                    className="text-xs text-ink/40 font-semibold px-1.5 py-1 rounded hover:bg-ink/5"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                /* ── Phase tab button ── */
-                <button
-                  type="button"
-                  onClick={() => setSelectedPhaseId(phase.id)}
-                  className={cn(
-                    'rounded-lg border px-3.5 py-2 text-sm font-medium transition-all flex items-center gap-1.5',
-                    selectedPhaseId === phase.id
-                      ? 'border-amber bg-amber/10 text-amber'
-                      : 'border-ink/15 text-ink/60 hover:border-ink/30 hover:text-ink',
-                  )}
-                >
-                  {phase.name}
-                  <span className={cn(
-                    'text-[10px] font-semibold uppercase tracking-wide rounded-full px-1.5 py-0.5',
-                    phaseTypeBadgeClass(phase.phase_type),
-                  )}>
-                    {phaseTypeLabel(phase.phase_type)}
-                  </span>
-                </button>
-              )}
-
-              {/* Edit / Delete controls — visible on hover */}
-              {renamingPhaseId !== phase.id && (
-                <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity ml-0.5">
-                  {/* Rename */}
-                  <button
-                    type="button"
-                    onClick={() => startRenamePhase(phase)}
-                    title="Đổi tên giai đoạn"
-                    className="h-6 w-6 rounded flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/8 transition-colors"
-                  >
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </button>
-                  {/* Delete (only if >1 phase remains) */}
-                  {phases.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setPendingDelete({ kind: 'phase', id: phase.id })}
-                      title="Xoá giai đoạn"
-                      className="h-6 w-6 rounded flex items-center justify-center text-danger/40 hover:text-danger hover:bg-danger/8 transition-colors"
-                    >
-                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* "+ Thêm Meso" button */}
-          <button
-            type="button"
-            onClick={() => setAddPhaseOpen(true)}
-            className="rounded-lg border border-dashed border-amber/40 px-3.5 py-2 text-xs font-semibold text-amber/60 hover:border-amber hover:text-amber hover:bg-amber/4 transition-all flex items-center gap-1"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Thêm Meso
-          </button>
-        </div>
-      </div>
+      <PhaseTabs
+        activeBlock={activeBlock}
+        phases={phases}
+        selectedPhaseId={selectedPhaseId}
+        setSelectedPhaseId={setSelectedPhaseId}
+        renamingPhaseId={renamingPhaseId}
+        setRenamingPhaseId={setRenamingPhaseId}
+        renamingPhaseRef={renamingPhaseRef}
+        renamePhaseValue={renamePhaseValue}
+        setRenamePhaseValue={setRenamePhaseValue}
+        startRenamePhase={startRenamePhase}
+        commitRenamePhase={commitRenamePhase}
+        setPendingDelete={setPendingDelete}
+        setAddPhaseOpen={setAddPhaseOpen}
+      />
 
       {/* ── Empty state: block has no phases yet ─────────────────────────── */}
       {phases.length === 0 && (
@@ -1661,444 +1486,69 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* ── WEEK SCOPE (migration 011) ─────────────────────────────── */}
           {/* ════════════════════════════════════════════════════════════════ */}
           {durationWeeks > 0 && (
-            <div className="rounded-xl border border-ink/10 bg-white px-4 py-3 space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <p className="text-xs font-semibold uppercase tracking-widest text-ink/40">
-                  Tuần tập
-                  <span className="ml-2 normal-case font-normal text-[11px] text-ink/40 tracking-normal">
-                    Set up bài / sets / reps riêng cho từng tuần
-                  </span>
-                </p>
-                <div className="flex items-center gap-2">
-                  {weekBusy && (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber border-t-transparent" />
-                  )}
-                  {/* One importer for both shapes: many buổi, many tuần, or both. */}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setProgramImportSummary(null)
-                      setWeekImportSummary(null)
-                      setPlanImportOpen(true)
-                    }}
-                    disabled={!selectedPhaseId}
-                    title="Nhập giáo án từ Excel — nhiều buổi trong một tuần, hoặc cả chương trình nhiều tuần"
-                  >
-                    ⬆ Nhập từ Excel (tuần & buổi)
-                  </Button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setSelectedWeek(null)}
-                  className={cn(
-                    'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all',
-                    selectedWeek === null
-                      ? 'border-ink bg-ink text-paper'
-                      : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
-                  )}
-                >
-                  Gốc
-                </button>
-                {weekNumbers.map(w => {
-                  const custom = weekIsCustomized(w)
-                  const active = selectedWeek === w
-                  return (
-                    <button
-                      key={w}
-                      type="button"
-                      onClick={() => setSelectedWeek(w)}
-                      className={cn(
-                        'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all inline-flex items-center gap-1.5',
-                        active
-                          ? 'border-amber bg-amber/10 text-amber'
-                          : custom
-                            ? 'border-amber/40 text-amber/80 hover:bg-amber/5'
-                            : 'border-ink/15 text-ink/55 hover:border-ink/30 hover:text-ink',
-                      )}
-                    >
-                      Tuần {w}
-                      {custom && <span className="h-1.5 w-1.5 rounded-full bg-amber" />}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {selectedWeek === null ? (
-                <p className="text-[11px] text-ink/45">
-                  Đang chỉnh <strong className="text-ink/70">bộ Gốc</strong> — áp dụng cho mọi tuần chưa có bản riêng.
-                </p>
-              ) : viewingUncustomizedWeek ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber/25 bg-amber/5 px-3 py-2">
-                  <span className="text-[11px] text-ink/60">
-                    Tuần {selectedWeek} đang dùng bộ Gốc ({baseExerciseCount} bài). Tạo bản riêng để set up khác đi.
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    loading={weekBusy}
-                    onClick={() => void customizeWeek(selectedWeek)}
-                    className="text-amber border-amber/40 hover:bg-amber/10"
-                  >
-                    Tùy chỉnh tuần này
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] text-amber/80">
-                    Tuần {selectedWeek} có bản riêng — chỉnh bên dưới không ảnh hưởng các tuần khác.
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPendingWeekReset(selectedWeek)}
-                    className="text-[11px] font-semibold text-danger/70 hover:text-danger underline underline-offset-2"
-                  >
-                    Khôi phục về Gốc
-                  </button>
-                </div>
-              )}
-            </div>
+            <WeekScopeBar
+              weekBusy={weekBusy}
+              selectedPhaseId={selectedPhaseId}
+              selectedWeek={selectedWeek}
+              setSelectedWeek={setSelectedWeek}
+              weekNumbers={weekNumbers}
+              weekIsCustomized={weekIsCustomized}
+              viewingUncustomizedWeek={viewingUncustomizedWeek}
+              baseExerciseCount={baseExerciseCount}
+              customizeWeek={customizeWeek}
+              setPendingWeekReset={setPendingWeekReset}
+              openPlanImport={openPlanImport}
+            />
           )}
 
           {/* Result of the last one-week import — only that week changed. */}
           {weekImportSummary && (
-            <div className="rounded-xl border border-herb/25 bg-herb/6 px-4 py-3 flex items-start gap-3">
-              <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-xs font-semibold text-herb">
-                  Đã nhập {weekImportSummary.dayCount} buổi tập vào{' '}
-                  {weekImportSummary.week == null ? 'bộ Gốc' : `Tuần ${weekImportSummary.week}`}
-                  {' '}({weekImportSummary.added} dòng bài tập)
-                </p>
-                <p className="text-[11px] text-ink/60 leading-relaxed">
-                  {weekImportSummary.week == null
-                    ? 'Bộ Gốc áp dụng cho mọi tuần chưa có bản riêng.'
-                    : 'Các tuần khác giữ nguyên — chọn tab tuần ở trên để nhập tiếp tuần kế.'}
-                </p>
-                {weekImportSummary.createdExercises.length > 0 && (
-                  <p className="text-[11px] text-ink/60 leading-relaxed">
-                    {weekImportSummary.createdExercises.length} bài tập mới đã được thêm vào Kho bài tập
-                    ({weekImportSummary.createdExercises.map(e => e.name).join(', ')}) — mới chỉ có tên,
-                    hãy vào <span className="font-semibold">Thư viện</span> để điền loại bài, chuỗi
-                    chuyển động và nhóm cơ.
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setWeekImportSummary(null)}
-                aria-label="Đóng thông báo"
-                className="shrink-0 h-6 w-6 flex items-center justify-center rounded text-ink/30 hover:text-ink hover:bg-ink/6 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+            <WeekImportBanner
+              weekImportSummary={weekImportSummary}
+              onDismiss={() => setWeekImportSummary(null)}
+            />
           )}
 
           {/* Result of the last whole-program import — the meso's weeks, days and
               exercises were all rewritten, so summarise what landed. */}
           {programImportSummary && (
-            <div className="rounded-xl border border-herb/25 bg-herb/6 px-4 py-3 flex items-start gap-3">
-              <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-xs font-semibold text-herb">
-                  Đã tạo {programImportSummary.weeks.length} tuần tập từ Excel
-                  {' '}({programImportSummary.splitDays.length} buổi/tuần,{' '}
-                  {programImportSummary.added} dòng bài tập)
-                </p>
-                <p className="text-[11px] text-ink/60 leading-relaxed">
-                  Mỗi tuần đã có bản riêng — bấm vào <span className="font-semibold">Tuần 1…N</span> ở trên
-                  để xem và chỉnh từng tuần.
-                </p>
-                {programImportSummary.createdExercises.length > 0 && (
-                  <p className="text-[11px] text-ink/60 leading-relaxed">
-                    {programImportSummary.createdExercises.length} bài tập mới đã được thêm vào Kho bài tập
-                    ({programImportSummary.createdExercises.map(e => e.name).join(', ')}) — mới chỉ có tên,
-                    hãy vào <span className="font-semibold">Thư viện</span> để điền loại bài, chuỗi
-                    chuyển động và nhóm cơ.
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setProgramImportSummary(null)}
-                aria-label="Đóng thông báo"
-                className="shrink-0 h-6 w-6 flex items-center justify-center rounded text-ink/30 hover:text-ink hover:bg-ink/6 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+            <ProgramImportBanner
+              programImportSummary={programImportSummary}
+              onDismiss={() => setProgramImportSummary(null)}
+            />
           )}
 
           {/* ════════════════════════════════════════════════════════════════ */}
           {/* ── SPLIT CONFIG SECTION ───────────────────────────────────── */}
           {/* ════════════════════════════════════════════════════════════════ */}
-          <div className="rounded-xl border border-ink/10 bg-white overflow-hidden">
-
-            {/* Header row — stacks on mobile so the controls never overlap the title */}
-            <div className="px-4 sm:px-5 py-4 border-b border-ink/8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-widest text-ink/40">
-                  Kiểu Chương Trình Tập
-                </p>
-                {recommended && !splitType && (
-                  <p className="text-xs text-ink/50 mt-0.5">
-                    Gợi ý cho{' '}
-                    <strong className="text-ink">{selectedPhase.frequency_per_week} buổi/tuần</strong>:{' '}
-                    <button
-                      onClick={() => handleSetSplitType(recommended)}
-                      className="text-amber font-semibold underline underline-offset-2 hover:text-amber/70"
-                    >
-                      {getSplitConfig(recommended).label}
-                    </button>
-                  </p>
-                )}
-                {splitType && (
-                  <p className="text-sm font-medium text-ink mt-0.5">
-                    {getSplitConfig(splitType).label}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-                {/* ── Lưu cấu hình giáo án — explicit save button ── */}
-                {splitType && (
-                  <button
-                    type="button"
-                    onClick={handleSaveConfig}
-                    disabled={saveStatus === 'saving'}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-semibold transition-all',
-                      saveStatus === 'saved'
-                        ? 'border-herb/40 bg-herb/8 text-herb'
-                        : saveStatus === 'error'
-                          ? 'border-danger/40 bg-danger/8 text-danger'
-                          : saveStatus === 'saving'
-                            ? 'border-amber/30 bg-amber/8 text-amber cursor-wait'
-                            : saveStatus === 'nochange'
-                              ? 'border-ink/20 bg-ink/5 text-ink/50'
-                              : configDirty
-                                ? 'border-amber/50 bg-amber/8 text-amber'
-                                : 'border-ink/20 bg-white text-ink hover:border-amber/50 hover:bg-amber/5 hover:text-amber',
-                    )}
-                  >
-                    {saveStatus === 'saving' && (
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    )}
-                    {saveStatus === 'saved'    && <span>✓</span>}
-                    {saveStatus === 'error'    && <span>✕</span>}
-                    {saveStatus === 'nochange' && <span>•</span>}
-                    {saveStatus === 'idle' && configDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber" />}
-                    {saveStatus === 'saving'   ? 'Đang lưu…'
-                     : saveStatus === 'saved'    ? 'Đã lưu cấu hình'
-                     : saveStatus === 'error'    ? 'Lưu thất bại — thử lại'
-                     : saveStatus === 'nochange' ? 'Không có thay đổi'
-                     : configDirty ? 'Lưu cấu hình giáo án *'
-                     : 'Lưu cấu hình giáo án'}
-                  </button>
-                )}
-
-                {/* Split type dropdown */}
-                <select
-                  value={splitType ?? ''}
-                  onChange={e => {
-                    const val = e.target.value as SplitType
-                    if (val) handleSetSplitType(val)
-                  }}
-                  className="flex-1 sm:flex-none min-w-[150px] rounded-lg border border-ink/15 bg-white px-3 py-1.5 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                >
-                  <option value="">— Chọn kiểu split —</option>
-                  {SPLIT_TYPE_OPTIONS.map(o => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Server-side reason when a save fails — surfaced so issues aren't
-                hidden behind a generic "Lưu thất bại". */}
-            {saveStatus === 'error' && saveErrorMsg && (
-              <div className="mx-5 mb-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-                Lỗi: {saveErrorMsg}
-              </div>
-            )}
-
-            {/* Split description + day tabs */}
-            {splitType && (
-              <div className="px-5 py-4 space-y-4">
-                <p className="text-xs text-ink/50 leading-relaxed">
-                  {getSplitConfig(splitType).description}
-                </p>
-
-                {/* Day tab strip */}
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-semibold text-ink/40 uppercase tracking-wide shrink-0">
-                      Các ngày:
-                    </span>
-
-                    {splitDays.map((day, dayIdx) => (
-                      <div key={day.id} className="flex items-center gap-0.5 group">
-                        {renamingDayId === day.id ? (
-                          /* ── Inline rename ── */
-                          <div className="flex items-center gap-1">
-                            <input
-                              ref={renameRef}
-                              type="text"
-                              value={renameLabel}
-                              onChange={e => setRenameLabel(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter')  commitRenameDay()
-                                if (e.key === 'Escape') setRenamingDayId(null)
-                              }}
-                              className="rounded border border-amber px-2 py-1 text-sm font-medium text-ink focus:outline-none w-32"
-                            />
-                            <button onClick={commitRenameDay}
-                              className="text-xs text-herb font-semibold px-1.5 py-1 rounded hover:bg-herb/10">
-                              ✓
-                            </button>
-                            <button onClick={() => setRenamingDayId(null)}
-                              className="text-xs text-ink/40 font-semibold px-1.5 py-1 rounded hover:bg-ink/5">
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          /* ── Day tab button ── */
-                          <button
-                            onClick={() => setActiveDayId(day.id)}
-                            className={cn(
-                              'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all flex items-center gap-1.5',
-                              activeDayId === day.id
-                                ? 'border-amber bg-amber/10 text-amber'
-                                : 'border-ink/12 text-ink/55 hover:border-ink/25 hover:text-ink',
-                            )}
-                          >
-                            {day.label}
-                            {/* Pill showing how many exercises are assigned —
-                                scoped to the current week (Gốc or override) so it
-                                matches the table below (migration 011). */}
-                            {(() => {
-                              const n = scopedExercises.filter(pe => pe.day_id === day.id).length
-                              return n > 0 ? (
-                                <span className={cn(
-                                  'rounded-full text-[9px] font-bold px-1.5 py-0.5 leading-none',
-                                  activeDayId === day.id
-                                    ? 'bg-amber/25 text-amber'
-                                    : 'bg-ink/10 text-ink/50',
-                                )}>
-                                  {n}
-                                </span>
-                              ) : null
-                            })()}
-                          </button>
-                        )}
-
-                        {/* Per-tab actions — visible on hover */}
-                        {renamingDayId !== day.id && (
-                          <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                            {splitDays.length > 1 && (
-                              <>
-                                <button
-                                  onClick={() => moveDay(day.id, -1)}
-                                  disabled={dayIdx === 0}
-                                  title="Chuyển sang trái"
-                                  className="h-6 w-6 rounded flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                                >
-                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => moveDay(day.id, 1)}
-                                  disabled={dayIdx === splitDays.length - 1}
-                                  title="Chuyển sang phải"
-                                  className="h-6 w-6 rounded flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                                >
-                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                  </svg>
-                                </button>
-                              </>
-                            )}
-                            <button
-                              onClick={() => startRenameDay(day)}
-                              title="Đổi tên ngày"
-                              className="h-6 w-6 rounded flex items-center justify-center text-ink/35 hover:text-ink hover:bg-ink/8 transition-colors"
-                            >
-                              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                              </svg>
-                            </button>
-                            {splitDays.length > 1 && (
-                              <button
-                                onClick={() => handleDeleteDay(day.id)}
-                                title="Xoá ngày"
-                                className="h-6 w-6 rounded flex items-center justify-center text-danger/40 hover:text-danger hover:bg-danger/8 transition-colors"
-                              >
-                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-
-                    {/* Add day button — mở bảng thêm nhiều ngày một lượt */}
-                    <button
-                      onClick={() => setAddingDay(v => !v)}
-                      className={cn(
-                        'rounded-lg border border-dashed px-3 py-1.5 text-xs font-medium transition-colors',
-                        addingDay
-                          ? 'border-amber/60 bg-amber/10 text-amber'
-                          : 'border-ink/20 text-ink/40 hover:border-ink/35 hover:text-ink/60',
-                      )}
-                    >
-                      + Thêm ngày
-                    </button>
-                  </div>
-
-                  {/* ── Bảng thêm nhiều ngày tập cùng lúc ── */}
-                  {addingDay && (
-                    <AddDaysPanel
-                      splitType={splitType}
-                      splitDays={splitDays}
-                      onAdd={handleAddDays}
-                      closeAddDays={() => setAddingDay(false)}
-                    />
-                  )}
-
-                  {/* Active day description */}
-                  {activeDay && splitType && (
-                    <div className="mt-3 rounded-lg bg-amber/5 border border-amber/15 px-4 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-1.5 rounded-full bg-amber shrink-0" />
-                        <p className="text-xs font-semibold text-amber">
-                          Đang cấu hình: {activeDay.label}
-                        </p>
-                        <span className="ml-auto text-[10px] text-ink/35">
-                          {visibleExercises.length} bài tập
-                        </span>
-                      </div>
-                      {PATTERN_NAMES_BY_DAY[activeDay.type as DayType]?.length > 0 && (
-                        <p className="text-[11px] text-ink/45 mt-1 pl-3.5">
-                          Chuỗi chuyển động phù hợp:{' '}
-                          <span className="text-ink/65 font-medium">
-                            {PATTERN_NAMES_BY_DAY[activeDay.type as DayType].join(' · ')}
-                          </span>
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <SplitConfigCard
+            recommended={recommended}
+            splitType={splitType}
+            selectedPhase={selectedPhase}
+            handleSetSplitType={handleSetSplitType}
+            handleSaveConfig={handleSaveConfig}
+            saveStatus={saveStatus}
+            configDirty={configDirty}
+            saveErrorMsg={saveErrorMsg}
+            splitDays={splitDays}
+            activeDayId={activeDayId}
+            setActiveDayId={setActiveDayId}
+            activeDay={activeDay}
+            renamingDayId={renamingDayId}
+            setRenamingDayId={setRenamingDayId}
+            renameRef={renameRef}
+            renameLabel={renameLabel}
+            setRenameLabel={setRenameLabel}
+            startRenameDay={startRenameDay}
+            commitRenameDay={commitRenameDay}
+            moveDay={moveDay}
+            handleDeleteDay={handleDeleteDay}
+            addingDay={addingDay}
+            setAddingDay={setAddingDay}
+            handleAddDays={handleAddDays}
+            scopedExercises={scopedExercises}
+            visibleExercises={visibleExercises}
+          />
 
           {/* ════════════════════════════════════════════════════════════════ */}
           {/* ── WEEKLY VOLUME SUMMARY ──────────────────────────────────── */}
@@ -2191,31 +1641,11 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* Result of the last Excel import — highlights any name that was newly
               added to Kho bài tập, since those still need their details filled in. */}
           {importSummary && (
-            <div className="rounded-xl border border-herb/25 bg-herb/6 px-4 py-3 flex items-start gap-3">
-              <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-xs font-semibold text-herb">
-                  Đã nhập {importSummary.added} bài tập từ Excel
-                  {activeDay ? ` vào “${activeDay.label}”` : ''}
-                </p>
-                {importSummary.createdExercises.length > 0 && (
-                  <p className="text-[11px] text-ink/60 leading-relaxed">
-                    {importSummary.createdExercises.length} bài tập mới đã được thêm vào Kho bài tập
-                    ({importSummary.createdExercises.map(e => e.name).join(', ')}) — mới chỉ có tên,
-                    hãy vào <span className="font-semibold">Thư viện</span> để điền loại bài, chuỗi
-                    chuyển động và nhóm cơ.
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setImportSummary(null)}
-                aria-label="Đóng thông báo"
-                className="shrink-0 h-6 w-6 flex items-center justify-center rounded text-ink/30 hover:text-ink hover:bg-ink/6 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+            <DayImportBanner
+              importSummary={importSummary}
+              activeDay={activeDay}
+              onDismiss={() => setImportSummary(null)}
+            />
           )}
 
           {/* Preview hint — assignments are pinned, so saved-config exercises are
@@ -2283,114 +1713,23 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* Orphan-recovery banner — exercises that lost their day (e.g. from a
               previous split-type change). They still exist; re-attach them here.
               Coach ticks the ones to move, picks a target day, then confirms. */}
-          {splitType && orphanExercises.length > 0 && (() => {
-            const selectedCount = orphanExercises.filter(e => selectedOrphanIds.has(e.id)).length
-            const effectiveTargetId = orphanTargetDayId ?? activeDayId
-            const targetDay = splitDays.find(d => d.id === effectiveTargetId) ?? null
-            return (
-            <div className="rounded-xl border border-amber/30 bg-amber/5 px-4 py-3 space-y-3">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-amber/90">
-                    ⚠ {orphanExercises.length} bài tập chưa thuộc ngày nào
-                  </p>
-                  <p className="text-xs text-ink/55 mt-0.5">
-                    Tích chọn bài tập rồi chuyển vào một ngày — hoặc xoá hẳn khỏi giáo án. “Chọn tất cả” để thao tác với toàn bộ.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={toggleSelectAllOrphans}
-                    className="text-xs font-semibold text-ink/55 hover:text-ink px-2 py-1 rounded hover:bg-ink/5 transition-colors"
-                  >
-                    {selectedCount === orphanExercises.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
-                  </button>
-                  {activeDay && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void assignOrphansToActiveDay()}
-                      disabled={assigningOrphans}
-                    >
-                      Chuyển tất cả vào “{activeDay.label}”
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {/* Selectable exercise chips — click to toggle the green check */}
-              <div className="flex flex-wrap gap-1.5">
-                {orphanExercises.map(pe => {
-                  const checked = selectedOrphanIds.has(pe.id)
-                  return (
-                    <button
-                      key={pe.id}
-                      type="button"
-                      onClick={() => toggleOrphanSelection(pe.id)}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors',
-                        checked
-                          ? 'border-herb bg-herb/10 text-herb font-semibold'
-                          : 'border-ink/10 bg-white text-ink/70 hover:border-ink/25',
-                      )}
-                    >
-                      <span className={cn(
-                        'flex h-3.5 w-3.5 items-center justify-center rounded-[4px] border text-[9px] leading-none',
-                        checked ? 'border-herb bg-herb text-white' : 'border-ink/25 bg-white',
-                      )}>
-                        {checked ? '✓' : ''}
-                      </span>
-                      {pe.exercise?.name ?? '—'}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Target-day picker + confirm — only meaningful once something is ticked */}
-              {selectedCount > 0 && (
-                <div className="flex flex-wrap items-center gap-2 border-t border-amber/20 pt-2.5">
-                  <span className="text-xs text-ink/55">
-                    Chuyển <span className="font-semibold text-ink">{selectedCount}</span> bài đã chọn vào:
-                  </span>
-                  {splitDays.map(day => (
-                    <button
-                      key={day.id}
-                      type="button"
-                      onClick={() => setOrphanTargetDayId(day.id)}
-                      className={cn(
-                        'rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all',
-                        effectiveTargetId === day.id
-                          ? 'border-amber bg-amber/10 text-amber'
-                          : 'border-ink/12 text-ink/55 hover:border-ink/25 hover:text-ink',
-                      )}
-                    >
-                      {day.label}
-                    </button>
-                  ))}
-                  <Button
-                    size="sm"
-                    onClick={() => void assignSelectedOrphansToDay()}
-                    disabled={assigningOrphans || !effectiveTargetId}
-                  >
-                    {assigningOrphans ? 'Đang chuyển…' : `Chuyển vào “${targetDay?.label ?? '—'}”`}
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingDelete({
-                      kind: 'orphans',
-                      ids:  orphanExercises.filter(e => selectedOrphanIds.has(e.id)).map(e => e.id),
-                    })}
-                    disabled={assigningOrphans}
-                    className="text-xs font-semibold text-danger/70 hover:text-danger px-2.5 py-1.5 rounded-lg hover:bg-danger/8 transition-colors disabled:opacity-40"
-                  >
-                    Xoá {selectedCount} bài đã chọn
-                  </button>
-                </div>
-              )}
-            </div>
-            )
-          })()}
+          {splitType && orphanExercises.length > 0 && (
+            <OrphanPanel
+              orphanExercises={orphanExercises}
+              selectedOrphanIds={selectedOrphanIds}
+              orphanTargetDayId={orphanTargetDayId}
+              setOrphanTargetDayId={setOrphanTargetDayId}
+              activeDayId={activeDayId}
+              activeDay={activeDay}
+              splitDays={splitDays}
+              assigningOrphans={assigningOrphans}
+              toggleSelectAllOrphans={toggleSelectAllOrphans}
+              toggleOrphanSelection={toggleOrphanSelection}
+              assignOrphansToActiveDay={assignOrphansToActiveDay}
+              assignSelectedOrphansToDay={assignSelectedOrphansToDay}
+              setPendingDelete={setPendingDelete}
+            />
+          )}
 
           {loading ? (
             <div className="flex items-center justify-center py-8">
@@ -2429,419 +1768,19 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* ════════════════════════════════════════════════════════════════ */}
           {addOpen && (
             <div ref={addPanelRef} className="scroll-mt-4">
-            <Card accent="amber">
-              <CardBody>
-                <div className="space-y-5">
-
-                  {/* Panel title */}
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-ink">
-                      Thêm bài tập vào{' '}
-                      <span className="text-amber">{selectedPhase.name}</span>
-                      {activeDay && (
-                        <span className="text-ink/45"> · {activeDay.label}</span>
-                      )}
-                    </p>
-                    {splitType && activeDay && (
-                      <span className="shrink-0 text-[10px] rounded-full bg-amber/10 border border-amber/20 text-amber px-2.5 py-0.5 font-semibold uppercase tracking-wide">
-                        Lọc theo {activeDay.label}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* ── Kiểu xếp lịch (Loading Style) ── */}
-                  <div className="rounded-lg border border-ink/10 bg-ink/2 p-4 space-y-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-ink/55">
-                      Kiểu xếp lịch
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {LOADING_STYLE_OPTIONS.map(opt => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => {
-                            setLoadingStyle(opt.value)
-                            setOrderLabel('')
-                          }}
-                          className={cn(
-                            'flex flex-col items-start rounded-lg border px-3.5 py-3 text-left transition-all',
-                            loadingStyle === opt.value
-                              ? 'border-amber bg-amber/8 shadow-sm'
-                              : 'border-ink/12 bg-white hover:border-ink/25',
-                          )}
-                        >
-                          <span className={cn(
-                            'text-xs font-bold',
-                            loadingStyle === opt.value ? 'text-amber' : 'text-ink',
-                          )}>
-                            {opt.label}
-                          </span>
-                          <span className="text-[11px] text-ink/45 mt-0.5 leading-snug">
-                            {opt.desc}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* ── Exercise picker ── */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Pattern filter */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                        Chuỗi Chuyển Động
-                        {activeDay && PATTERN_NAMES_BY_DAY[activeDay.type as DayType]?.length > 0 && (
-                          <span className="ml-1.5 text-[10px] font-normal text-amber normal-case">
-                            (lọc theo {activeDay.label})
-                          </span>
-                        )}
-                      </label>
-                      <select
-                        value={filterPattern}
-                        onChange={e => { setFilterPattern(e.target.value); setSelectedExercise('') }}
-                        className="rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                      >
-                        {patternOptions.map(o => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <Select
-                      label="Bài tập"
-                      value={selectedExercise}
-                      onChange={e => setSelectedExercise(e.target.value)}
-                      options={filteredExercises.map(e => ({ value: e.id, label: e.name }))}
-                      placeholder="Chọn bài tập..."
-                    />
-                  </div>
-
-                  {/* ── Training context badge ─────────────────────────────────────── */}
-                  {/* Shown only when a non-standard week type is active so the coach
-                      sees at-a-glance which field set is currently in use. */}
-                  {phaseWeekType !== 'standard' && (
-                    <div className={cn(
-                      'flex items-center gap-2 rounded-lg border px-3 py-2',
-                      isStrengthContext
-                        ? 'border-danger/25 bg-danger/4'
-                        : 'border-herb/25 bg-herb/4',
-                    )}>
-                      <span className="text-sm shrink-0">
-                        {phaseWeekType === 'peaking' ? '🎯' : phaseWeekType === 'taper' ? '⬇️' : '🌿'}
-                      </span>
-                      <p className={cn(
-                        'text-[11px] font-semibold',
-                        isStrengthContext ? 'text-danger/80' : 'text-herb/80',
-                      )}>
-                        {phaseWeekType === 'peaking' && 'Peaking — kê đơn bằng % 1RM + reps thấp (1–5)'}
-                        {phaseWeekType === 'taper'   && 'Taper — giảm thể tích, giữ cường độ cao, kê đơn bằng % 1RM'}
-                        {phaseWeekType === 'deload'  && 'Deload — giảm tải, dùng RIR cao hơn thường lệ (3–4)'}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* ── Target prescription grid (always 4 columns) ─────────────────── */}
-                  {/*
-                   * Column 4 is CONTEXT-AWARE:
-                   *   Hypertrophy / Standard / Deload → RIR mục tiêu
-                   *   Strength / Peaking / Taper      → % 1RM mục tiêu
-                   *
-                   * This keeps the grid height constant — no layout jumps when
-                   * the coach switches between week types via the selector above.
-                   */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-
-                    {/* Col 1 — Số hiệp (always) */}
-                    <Input
-                      label="Số hiệp"
-                      type="number"
-                      value={targetSets}
-                      onChange={e => setTargetSets(e.target.value)}
-                    />
-
-                    {/* Col 2 — Rep Min (always) */}
-                    <Input
-                      label="Rep Tối thiểu"
-                      type="number"
-                      value={targetRepMin}
-                      onChange={e => setTargetRepMin(e.target.value)}
-                    />
-
-                    {/* Col 3 — Rep Max (clamped ≤ 5 in strength context when %1RM set) */}
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-semibold font-sans uppercase tracking-wide text-ink/60">
-                        Rep Tối đa
-                        {isStrengthContext && target1rmPct && (
-                          <span className="ml-1.5 font-mono text-[10px] font-bold text-danger normal-case">
-                            ≤ 5
-                          </span>
-                        )}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max={isStrengthContext && target1rmPct ? 5 : 30}
-                        value={targetRepMax}
-                        onChange={e => {
-                          const raw = e.target.value
-                          const n = parseInt(raw)
-                          // Enforce upper bound when %1RM is prescribed in strength context
-                          if (isStrengthContext && target1rmPct && !isNaN(n) && n > 5) {
-                            setTargetRepMax('5')
-                          } else {
-                            setTargetRepMax(raw)
-                          }
-                        }}
-                        className="h-10 w-full rounded-lg border border-ink/15 bg-white px-3 font-mono text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                      />
-                    </div>
-
-                    {/* Col 4 — RIR (hypertrophy) ↔ % 1RM (strength) */}
-                    {isStrengthContext ? (
-
-                      /* ── Strength / Peaking: prescribe by %1RM ── */
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-semibold font-sans uppercase tracking-wide text-danger/80">
-                          % 1RM mục tiêu
-                        </label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            min="50"
-                            max="100"
-                            step="5"
-                            value={target1rmPct}
-                            onChange={e => {
-                              setTarget1rmPct(e.target.value)
-                              // When %1RM is first entered, enforce rep max ≤ 5
-                              if (e.target.value && parseInt(targetRepMax) > 5) {
-                                setTargetRepMax('5')
-                              }
-                            }}
-                            placeholder="85"
-                            className="h-10 w-full rounded-lg border border-danger/30 bg-danger/3 px-3 pr-9 font-mono text-sm text-ink focus:border-danger focus:ring-1 focus:ring-danger/30 outline-none placeholder:font-mono placeholder:text-ink/30"
-                          />
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs text-danger/50 pointer-events-none">
-                            %
-                          </span>
-                        </div>
-                        {/* Live badge preview */}
-                        {target1rmPct && (
-                          <span className="self-start inline-flex items-center rounded-full bg-danger/10 border border-danger/25 px-2 py-0.5 font-mono text-[10px] font-bold text-danger">
-                            {target1rmPct}% 1RM
-                          </span>
-                        )}
-                      </div>
-
-                    ) : (
-
-                      /* ── Hypertrophy / Standard / Deload: prescribe by RIR ── */
-                      <Input
-                        label="RIR mục tiêu"
-                        type="number"
-                        value={rirTarget}
-                        onChange={e => setRirTarget(e.target.value)}
-                      />
-
-                    )}
-                  </div>
-
-                  {/* ── Context-specific advanced options ──────────────────────────── */}
-                  {isStrengthContext ? (
-
-                    /* ── Strength context: explain field logic, no AMRAP ── */
-                    <div className="rounded-xl border border-danger/20 bg-danger/3 px-4 py-3.5 flex items-start gap-3">
-                      <span className="text-base shrink-0 mt-0.5">📐</span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold font-sans text-danger/90 uppercase tracking-wide">
-                          Kê đơn theo cường độ tuyệt đối
-                        </p>
-                        <p className="text-[11px] font-sans text-ink/55 leading-snug mt-1">
-                          AMRAP không áp dụng trong giai đoạn này — mục tiêu là kỹ thuật và
-                          cường độ tối đa, không phải volume. Điền <strong>% 1RM</strong> ở cột bên trái và
-                          giữ <strong>Rep Tối đa{' '}</strong>
-                          <span className="font-mono">≤ 5</span> để đảm bảo đặc tính Strength/Peaking.
-                        </p>
-                      </div>
-                    </div>
-
-                  ) : (
-
-                    /* ── Hypertrophy context: AMRAP toggle, %1RM completely hidden ── */
-                    <label className={cn(
-                      'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
-                      isAmrap
-                        ? 'border-amber/40 bg-amber/6'
-                        : 'border-ink/10 bg-ink/2 hover:border-ink/20',
-                    )}>
-                      <input
-                        type="checkbox"
-                        checked={isAmrap}
-                        onChange={e => setIsAmrap(e.target.checked)}
-                        className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-amber"
-                      />
-                      <div className="min-w-0">
-                        <p className={cn(
-                          'text-xs font-bold font-sans',
-                          isAmrap ? 'text-amber' : 'text-ink',
-                        )}>
-                          🔥 Thiết lập hiệp cuối AMRAP
-                          <span className="ml-1.5 font-normal text-ink/40">
-                            (Eric Helms Hypertrophy Tech)
-                          </span>
-                        </p>
-                        <p className="text-[11px] font-sans text-ink/45 mt-0.5 leading-snug">
-                          Hiệp cuối cùng thực hiện tối đa số lần có thể cho tới khi RPE 10 — đo lường
-                          sức chịu đựng thực tế trong mesocycle.
-                        </p>
-                      </div>
-                    </label>
-
-                  )}
-
-                  {/* ── %1RM mục tiêu (tùy chọn) — hypertrophy/standard context ──────
-                      Strength context already exposes %1RM in column 4 of the grid;
-                      here we surface it for every other context so the coach can
-                      prescribe an explicit load in any phase. */}
-                  {!isStrengthContext && (
-                    <div className="flex flex-col gap-1.5 max-w-[240px]">
-                      <label className="text-xs font-semibold font-sans uppercase tracking-wide text-ink/60">
-                        % 1RM mục tiêu
-                        <span className="ml-1.5 font-normal normal-case text-ink/35">(tùy chọn)</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min="30"
-                          max="100"
-                          step="5"
-                          value={target1rmPct}
-                          onChange={e => setTarget1rmPct(e.target.value)}
-                          placeholder="vd 70"
-                          className="h-10 w-full rounded-lg border border-ink/15 bg-white px-3 pr-9 font-mono text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none placeholder:font-mono placeholder:text-ink/30"
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs text-ink/40 pointer-events-none">
-                          %
-                        </span>
-                      </div>
-                      {target1rmPct && (
-                        <span className="self-start inline-flex items-center rounded-full bg-danger/10 border border-danger/25 px-2 py-0.5 font-mono text-[10px] font-bold text-danger">
-                          {target1rmPct}% 1RM
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── Bài khởi động (warmup) — independent display marker ─────────── */}
-                  <label className={cn(
-                    'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
-                    isWarmup
-                      ? 'border-sky-400/45 bg-sky-400/8'
-                      : 'border-ink/10 bg-ink/2 hover:border-ink/20',
-                  )}>
-                    <input
-                      type="checkbox"
-                      checked={isWarmup}
-                      onChange={e => setIsWarmup(e.target.checked)}
-                      className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-sky-500"
-                    />
-                    <div className="min-w-0">
-                      <p className={cn(
-                        'text-xs font-bold font-sans',
-                        isWarmup ? 'text-sky-600' : 'text-ink',
-                      )}>
-                        🤸 Bài khởi động
-                      </p>
-                      <p className="text-[11px] font-sans text-ink/45 mt-0.5 leading-snug">
-                        Đánh dấu đây là bài khởi động — bảng bài tập sẽ hiện ghi chú “Bài khởi động”
-                        để người tập nhận biết.
-                      </p>
-                    </div>
-                  </label>
-
-                  {/* ── Ghi chú cho học viên (phase_exercises.notes) ───────────────── */}
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-semibold font-sans uppercase tracking-wide text-ink/60">
-                      Ghi chú bài tập
-                      <span className="ml-1.5 font-normal normal-case text-ink/35">(học viên sẽ thấy)</span>
-                    </label>
-                    <textarea
-                      value={exerciseNotes}
-                      onChange={e => setExerciseNotes(e.target.value)}
-                      rows={2}
-                      maxLength={300}
-                      placeholder="vd: Giữ lưng thẳng, hạ chậm 3 giây, nghỉ 90s giữa hiệp…"
-                      className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink leading-snug focus:border-amber focus:ring-1 focus:ring-amber outline-none resize-y placeholder:text-ink/30"
-                    />
-                  </div>
-
-                  {/* ── STT / Order label ── */}
-                  <div className="flex items-start gap-3">
-                    {loadingStyle === 'horizontal' ? (
-                      /* Auto-assigned preview badge */
-                      <div className="flex flex-col gap-1.5">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                          Mã STT (tự động)
-                        </span>
-                        <div className="flex items-center gap-2 rounded-lg border border-ink/10 bg-ink/3 px-3 py-2">
-                          <span className={cn(
-                            'rounded-md border font-bold text-sm px-2.5 py-0.5',
-                            orderBadgeClass(nextHorizontalLabel),
-                          )}>
-                            {nextHorizontalLabel}
-                          </span>
-                          <span className="text-xs text-ink/40">Tự động gán theo thứ tự</span>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Manual input for vertical/superset */
-                      <div className="flex flex-col gap-1.5 flex-1 max-w-[200px]">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                          Mã STT (tùy chỉnh)
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={orderLabel}
-                            onChange={e => setOrderLabel(e.target.value.toUpperCase())}
-                            placeholder="A1, B2…"
-                            maxLength={4}
-                            className="w-24 rounded-lg border border-ink/20 px-3 py-2 text-sm font-bold text-ink uppercase focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                          />
-                          {orderLabel && (
-                            <span className={cn(
-                              'rounded-md border font-bold text-sm px-2.5 py-0.5',
-                              orderBadgeClass(orderLabel),
-                            )}>
-                              {orderLabel.toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-ink/40 leading-snug">
-                          Cùng chữ cái = cùng nhóm superset (A1, A2 tập chung; B1, B2 tập chung…)
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {addError && <p className="text-sm text-danger">{addError}</p>}
-
-                  <div className="flex gap-2">
-                    <Button
-                      variant="primary" size="sm"
-                      loading={adding}
-                      onClick={() => void handleAdd()}
-                      disabled={!selectedExercise}
-                    >
-                      Thêm vào {activeDay ? activeDay.label : 'giai đoạn'}
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setAddOpen(false)}>
-                      Huỷ
-                    </Button>
-                  </div>
-                </div>
-              </CardBody>
-            </Card>
+              <AddExercisePanel
+                form={addForm}
+                selectedPhase={selectedPhase}
+                activeDay={activeDay}
+                splitType={splitType}
+                patternOptions={patternOptions}
+                filteredExercises={filteredExercises}
+                phaseWeekType={phaseWeekType}
+                isStrengthContext={isStrengthContext}
+                nextHorizontalLabel={nextHorizontalLabel}
+                handleAdd={handleAdd}
+                onClose={() => setAddOpen(false)}
+              />
             </div>
           )}
         </>
@@ -2952,7 +1891,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       <PhaseParamsModal
         phase={paramsPhase}
         onClose={() => setParamsPhase(null)}
-        onApply={applyPhaseParams}
+        onApply={patchPhase}
       />
     </div>
   )

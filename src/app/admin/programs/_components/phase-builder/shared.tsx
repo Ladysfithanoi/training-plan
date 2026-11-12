@@ -156,3 +156,34 @@ export function InlineNumberCell({
     />
   )
 }
+
+/**
+ * JSON body of POST /api/phases/[id]/commit-days.
+ *
+ * Each day is serialised to { id, type, label } — the exact shape stored in
+ * phases.split_days JSONB (falls back to [] so the NOT NULL column never gets
+ * null) — and only the exercise fields the endpoint needs are sent.
+ * Per-week (migration 011): day_exercises mirrors the BASE day structure, so
+ * only base rows (week_number null) are committed; week overrides share the
+ * same days.
+ */
+export function commitDaysBody(
+  splitType: SplitType | null,
+  splitDays: SplitDay[],
+  rows: PhaseExerciseRow[],
+): string {
+  return JSON.stringify({
+    split_type: splitType,
+    split_days: Array.isArray(splitDays)
+      ? splitDays.map(d => ({ id: d.id, type: d.type, label: d.label }))
+      : [],
+    phase_exercises: rows
+      .filter(pe => (pe.week_number ?? null) === null)
+      .map(pe => ({
+        id:            pe.id,
+        day_id:        pe.day_id        ?? null,
+        order_label:   pe.order_label   ?? null,
+        loading_style: pe.loading_style ?? 'horizontal',
+      })),
+  })
+}
