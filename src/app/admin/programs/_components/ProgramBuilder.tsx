@@ -13,6 +13,7 @@ import { HelpTip } from '@/components/ui/HelpTip'
 import { GLOSSARY } from '@/lib/glossary'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import { SPLIT_CONFIGS } from '@/lib/trainingSplit'
+import { AiBlockModal } from './AiBlockModal'
 import type { SplitType } from '@/lib/trainingSplit'
 import type { TrainingBlock, Phase, Exercise, MovementPattern, PhaseType, RepRange } from '@/types'
 
@@ -141,6 +142,9 @@ export function ProgramBuilder({
   const [editId,      setEditId]      = useState<string | null>(null)
   const [editName,    setEditName]    = useState('')
   const [editDesc,    setEditDesc]    = useState('')
+
+  // ── "Tạo bằng AI" modal ────────────────────────────────────────────────────
+  const [aiOpen, setAiOpen] = useState(false)
 
   // ── Delete confirmation (replaces window.confirm) ──────────────────────────
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -328,9 +332,20 @@ export function ProgramBuilder({
             Các Khối Tập
           </h2>
           {canAuthor && (
-            <Button size="sm" type="button" onClick={openCreateModal}>
-              + Tạo mới
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                type="button"
+                variant="secondary"
+                onClick={() => setAiOpen(true)}
+                title="Trả lời vài câu hỏi để AI đề xuất cả khối tập"
+              >
+                ✨ Tạo bằng AI
+              </Button>
+              <Button size="sm" type="button" onClick={openCreateModal}>
+                + Tạo mới
+              </Button>
+            </div>
           )}
         </div>
 
@@ -938,6 +953,23 @@ export function ProgramBuilder({
         }}
         onCancel={() => setConfirmDeleteId(null)}
       />
+
+      {/* ── Tạo khối tập bằng AI ───────────────────────────────────────────── */}
+      {canAuthor && (
+        <AiBlockModal
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          onCreated={block => {
+            onBlocksChange(prev => [block, ...prev])
+            onBlockSelect(block.id)
+            // New block is newest → switch to date_desc so it lands on page 1
+            setSortKey('date_desc')
+            setCurrentPage(1)
+            setAiOpen(false)
+            router.refresh()
+          }}
+        />
+      )}
     </div>
   )
 }
