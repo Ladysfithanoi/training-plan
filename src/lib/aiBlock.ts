@@ -285,7 +285,13 @@ export function buildPrompt(
   return { system: SYSTEM_PROMPT, prompt, refToId }
 }
 
-/** JSON Schema of the answer requested from Gemini. */
+/**
+ * JSON Schema of the answer requested from Gemini.
+ *
+ * No minItems / maxItems on purpose: with array bounds on these nested lists
+ * Gemini rejects the schema as too complex (400 INVALID_ARGUMENT). The list
+ * sizes are stated in the prompt and enforced by sanitizePlan() instead.
+ */
 export const PLAN_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
@@ -293,8 +299,6 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
     description: { type: 'string', description: '1–2 Vietnamese sentences: who the block is for and how it progresses.' },
     phases: {
       type: 'array',
-      minItems: 1,
-      maxItems: 6,
       items: {
         type: 'object',
         properties: {
@@ -304,7 +308,6 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
           split_type:     { type: 'string', enum: ['fullbody', 'upper_lower', 'ppl'] },
           rep_ranges: {
             type: 'array',
-            maxItems: 3,
             items: {
               type: 'object',
               properties: { min: { type: 'integer' }, max: { type: 'integer' } },
@@ -313,8 +316,6 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
           },
           days: {
             type: 'array',
-            minItems: 1,
-            maxItems: 7,
             items: {
               type: 'object',
               properties: {
@@ -322,8 +323,6 @@ export const PLAN_SCHEMA: Record<string, unknown> = {
                 label: { type: 'string' },
                 exercises: {
                   type: 'array',
-                  minItems: 1,
-                  maxItems: 10,
                   items: {
                     type: 'object',
                     properties: {
