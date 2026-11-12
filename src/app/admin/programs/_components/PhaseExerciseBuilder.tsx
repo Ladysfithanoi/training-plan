@@ -1,251 +1,50 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Card, CardBody } from '@/components/ui/Card'
-import { Modal } from '@/components/ui/Modal'
 import { ConfirmModal } from '@/components/ui/ConfirmModal'
-import { TechniqueButton } from '@/components/training/TechniqueButton'
 import { ImportScheduleExcelModal } from './ImportScheduleExcelModal'
 import type { ImportResult } from './ImportScheduleExcelModal'
 import { ImportPlanExcelModal } from './ImportPlanExcelModal'
 import type { PlanImportResult, ProgramImportResult, WeekImportResult } from './ImportPlanExcelModal'
+import { AddDaysPanel } from './phase-builder/AddDaysPanel'
+import { AddPhaseModal } from './phase-builder/AddPhaseModal'
+import { CrossMesoCopyPanel } from './phase-builder/CrossMesoCopyPanel'
+import { EditExerciseModal } from './phase-builder/EditExerciseModal'
+import { ExerciseTable } from './phase-builder/ExerciseTable'
+import { PhaseParamsModal } from './phase-builder/PhaseParamsModal'
+import type { PhaseParamsPatch } from './phase-builder/PhaseParamsModal'
+import { WeeklyVolumeSummary, SessionOverloadWarning } from './phase-builder/VolumePanels'
+import { getMuscleContributions, SESSION_SET_CAP } from './phase-builder/muscleVolume'
+import {
+  LOADING_STYLE_OPTIONS,
+  NUMERIC_LIMITS,
+  computeHorizontalLabel,
+  orderBadgeClass,
+  parseNumericField,
+  splitSig,
+} from './phase-builder/shared'
+import type { BlockWithPhases, NumericField, PhaseExerciseRow, SaveStatus } from './phase-builder/shared'
 import { phaseTypeLabel, phaseTypeBadgeClass, cn } from '@/lib/utils'
 import {
   recommendSplit,
   getSplitConfig,
   generateDefaultDays,
   filterPatternsByDay,
-  availableDayTypes,
-  buildDayBatch,
   SPLIT_TYPE_OPTIONS,
   DAY_TYPE_LABELS,
   PATTERN_NAMES_BY_DAY,
 } from '@/lib/trainingSplit'
 import type { SplitType, SplitDay, DayType } from '@/lib/trainingSplit'
-import type { Phase, Exercise, MovementPattern, PhaseExercise, WeekType, PhaseType, TrainingBlock, RepRange } from '@/types'
+import type { Phase, Exercise, MovementPattern, WeekType } from '@/types'
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-/**
- * Kiểu xếp lịch — Loading style options used in the add-exercise form.
- *
- * Horizontal Loading (Tập đơn lẻ):
- *   Coach completes ALL sets of exercise A before moving to B, then C, etc.
- *   Order labels are auto-assigned as simple letter sequences: A → B → C …
- *
- * Vertical Loading (Tập Superset / Cặp):
- *   Sets are grouped; the coach rotates between exercises in the same group.
- *   Order labels are manually entered as composite tags: A1, A2, B1, B2 …
- *   Exercises sharing the same letter prefix belong to the same superset.
- */
-const LOADING_STYLE_OPTIONS = [
-  {
-    value: 'horizontal' as const,
-    label: 'Horizontal Loading (Tập đơn lẻ)',
-    desc: 'Hoàn thành tất cả hiệp rồi mới chuyển bài. Mã STT tự động: A, B, C…',
-  },
-  {
-    value: 'vertical' as const,
-    label: 'Vertical Loading (Tập Superset / Cặp)',
-    desc: 'Xoay vòng giữa các bài trong cùng nhóm. Nhập mã tùy chỉnh: A1, A2, B1, B2…',
-  },
-]
-
-/**
- * Trần số buổi thêm được cho MỖI loại trong một lượt "Thêm ngày".
- * Đủ rộng cho mọi giáo án thực tế (tối đa vài vòng split/tuần) mà vẫn chặn được
- * trường hợp bấm nhầm giữ nút rồi sinh ra hàng trăm buổi trống.
- */
-const MAX_NEW_DAYS_PER_TYPE = 14
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Returns Tailwind classes for the STT order badge.
- * Colors are keyed by the first letter so all exercises in the same
- * superset group (A1, A2 …) share a consistent visual indicator.
- */
-function orderBadgeClass(label: string): string {
-  const ch = label[0]?.toUpperCase()
-  if (ch === 'A') return 'bg-amber/15 text-amber border-amber/40'
-  if (ch === 'B') return 'bg-herb/15 text-herb border-herb/35'
-  if (ch === 'C') return 'bg-sky-500/10 text-sky-600 border-sky-400/30'
-  if (ch === 'D') return 'bg-violet-500/10 text-violet-600 border-violet-400/30'
-  return 'bg-ink/8 text-ink/55 border-ink/20'
-}
-
-/**
- * Compute the next horizontal order label for a day given how many exercises
- * are already assigned to it (0 → 'A', 1 → 'B', … 25 → 'Z', 26 → 'A2', …).
- */
-function computeHorizontalLabel(existingCount: number): string {
-  const idx   = existingCount % 26
-  const cycle = Math.floor(existingCount / 26)
-  return cycle > 0
-    ? `${String.fromCharCode(65 + idx)}${cycle + 1}`
-    : String.fromCharCode(65 + idx)
-}
-
-/**
- * Maps a weekly set count to bar/text Tailwind classes and a range label.
- *
- * Thresholds follow Eric Helms / Renaissance Periodization volume landmarks:
- *   < 6   → Sub-MEV  (below Minimum Effective Volume — grey)
- *   6–11  → MEV zone (effective minimum — herb green)
- *  12–19  → MAV zone (Maximum Adaptive Volume — amber)
- *  ≥ 20   → At/above MRV (Maximum Recoverable Volume — danger red)
- */
-function getVolumeColor(sets: number): {
-  barClass:   string
-  textClass:  string
-  rangeLabel: string
-} {
-  if (sets >= 20) return { barClass: 'bg-danger/65', textClass: 'text-danger',  rangeLabel: '≥ MRV ↑' }
-  if (sets >= 12) return { barClass: 'bg-amber',     textClass: 'text-amber',   rangeLabel: 'MAV ✓'   }
-  if (sets >= 6)  return { barClass: 'bg-herb',      textClass: 'text-herb',    rangeLabel: 'MEV ✓'   }
-  return               { barClass: 'bg-ink/25',    textClass: 'text-ink/40',  rangeLabel: '< MEV'   }
-}
-
-/**
- * Formats a fractional set count for display.
- * Whole numbers → plain integer string.  Halves → one decimal (e.g. "4.5").
- */
-function formatSets(sets: number): string {
-  return Number.isInteger(sets) ? String(sets) : sets.toFixed(1)
-}
-
-// ── Anatomy mapping engine ────────────────────────────────────────────────────
-//
-// Maps a (movement-pattern name, exercise name) pair to the anatomical muscle
-// groups it recruits, weighted by their role as primary (1.0) or secondary
-// driver (0.5) per Eric Helms / RP synergist literature.
-//
-// PRIMARY driver  (1.0) — muscle is the main target of the movement.
-// SECONDARY driver (0.5) — muscle is significantly recruited but not the
-//   primary target; coaches should count these at half-credit when evaluating
-//   weekly volume against MEV/MAV/MRV thresholds.
-//
-// The "Push" pattern requires sub-classification because a bench press and an
-// overhead press share the same pattern label but recruit completely different
-// primary movers.  Exercise-name keywords are used as a heuristic.
-
-const VERTICAL_PUSH_KEYWORDS = [
-  'overhead', 'ohp', 'shoulder press', 'military press',
-  'arnold', 'push press', 'z press', 'landmine press',
-  'pike push', 'standing press', 'seated press',
-]
-
-function isPushVertical(exerciseName: string): boolean {
-  const lower = exerciseName.toLowerCase()
-  return VERTICAL_PUSH_KEYWORDS.some(kw => lower.includes(kw))
-}
-
-/**
- * Returns a Record<muscleName, fraction> for a given exercise.
- * fraction: 1.0 = primary, 0.5 = secondary.
- */
-function getMuscleContributions(
-  patternName: string,
-  exerciseName: string,
-): Record<string, number> {
-  const p = patternName.toLowerCase()
-
-  // ── Push ──────────────────────────────────────────────────────────────────
-  if (
-    p.includes('push') ||
-    p.includes('press') ||
-    p.includes('bench') ||
-    p.includes('chest') ||
-    p.includes('fly')
-  ) {
-    if (
-      p.includes('shoulder') ||
-      p.includes('overhead') ||
-      p.includes('ohp') ||
-      isPushVertical(exerciseName)
-    ) {
-      // Vertical push — OHP / shoulder-press focus
-      return {
-        'Vai (Delts)':        1.0,
-        'Tay sau (Triceps)':  0.5,
-      }
-    }
-    // Horizontal push — bench / chest focus
-    return {
-      'Ngực (Chest)':           1.0,
-      'Vai trước (Ant. Delt)':  0.5,
-      'Tay sau (Triceps)':      0.5,
-    }
-  }
-
-  // ── Pull ──────────────────────────────────────────────────────────────────
-  if (
-    p.includes('pull') ||
-    p.includes('row')  ||
-    p.includes('chin') ||
-    p.includes('lat')  ||
-    p.includes('back')
-  ) {
-    return {
-      'Lưng (Back)':           1.0,
-      'Tay trước (Biceps)':    0.5,
-      'Vai sau (Rear Delt)':   0.5,
-    }
-  }
-
-  // ── Squat ─────────────────────────────────────────────────────────────────
-  if (
-    p.includes('squat') ||
-    p.includes('leg press') ||
-    p.includes('lunge') ||
-    p.includes('split squat') ||
-    p.includes('bulgarian')
-  ) {
-    return {
-      'Đùi trước (Quads)': 1.0,
-      'Mông (Glutes)':      0.5,
-    }
-  }
-
-  // ── Hinge ─────────────────────────────────────────────────────────────────
-  if (
-    p.includes('hinge') ||
-    p.includes('deadlift') ||
-    p.includes('rdl') ||
-    p.includes('good morning') ||
-    p.includes('hip thrust') ||
-    p.includes('glute bridge')
-  ) {
-    return {
-      'Đùi sau / Mông (Ham/Glutes)': 1.0,
-      'Lưng dưới (Lower Back)':       1.0,
-    }
-  }
-
-  // ── Arm isolations (sometimes given their own pattern) ────────────────────
-  if (p.includes('bicep') || p.includes('curl')) {
-    return { 'Tay trước (Biceps)': 1.0 }
-  }
-  if (p.includes('tricep') || p.includes('extension') || p.includes('dip')) {
-    return { 'Tay sau (Triceps)': 1.0 }
-  }
-
-  // ── Shoulder isolation ────────────────────────────────────────────────────
-  if (p.includes('shoulder') || p.includes('lateral') || p.includes('delt')) {
-    return { 'Vai (Delts)': 1.0 }
-  }
-
-  // ── Unrecognised — keep raw pattern name so no volume silently disappears ─
-  return { [patternName.length > 0 ? patternName : 'Chưa phân loại']: 1.0 }
-}
+// Constants, helpers, the anatomy/volume engine and the smaller pieces of this
+// screen (table, panels, modals) live in ./phase-builder/*.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-/** A training block with its phases pre-joined (mirrors the Supabase query shape). */
-type BlockWithPhases = TrainingBlock & { phases: Phase[] }
 
 interface Props {
   /** All blocks belonging to this coach, each carrying their phases[].
@@ -260,89 +59,6 @@ interface Props {
   /** Push phase/block mutations up to the shared state so section 1
    *  (structure / timeline / rep-matrix) updates in lock-step. */
   onBlocksChange: (updater: (prev: BlockWithPhases[]) => BlockWithPhases[]) => void
-}
-
-interface PhaseExerciseRow extends PhaseExercise {
-  exercise: Exercise
-}
-
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'nochange'
-
-/** Stable signature of a split config (type + ordered days) for change detection. */
-function splitSig(type: SplitType | null, days: SplitDay[]): string {
-  return JSON.stringify({
-    type: type ?? null,
-    days: (days ?? []).map(d => ({ id: d.id, type: d.type, label: d.label })),
-  })
-}
-
-/** The inline numeric fields of the prescription table, with their legal bounds. */
-type NumericField = 'target_sets' | 'target_rep_min' | 'target_rep_max' | 'rir_target'
-
-const NUMERIC_LIMITS: Record<NumericField, { min: number; max: number }> = {
-  target_sets:    { min: 1, max: 10 },
-  target_rep_min: { min: 1, max: 100 },
-  target_rep_max: { min: 1, max: 100 },
-  rir_target:     { min: 0, max: 10 },
-}
-
-/**
- * Read a numeric form field, clamped to what the column may legally hold.
- * A blank / non-numeric entry keeps `fallback` — the value already stored —
- * rather than collapsing to a constant like 1.
- */
-function parseNumericField(field: NumericField, raw: string, fallback: number): number {
-  const n = parseInt(raw, 10)
-  if (Number.isNaN(n)) return fallback
-  const { min, max } = NUMERIC_LIMITS[field]
-  return Math.min(max, Math.max(min, n))
-}
-
-/**
- * One inline number cell in the prescription table.
- *
- * Typing only moves a LOCAL draft — the PATCH fires once, on blur or Enter.
- * The previous version saved on every keystroke, so editing "8" → "10" sent two
- * writes ({…:1} then {…:10}). Those requests race: when the first landed last,
- * the DB kept the intermediate digit and the coach's rep window snapped back to
- * things like 1-1 or 10-1 the next time the meso was opened.
- *
- * Escape abandons the draft, so a half-typed number can always be backed out of.
- */
-function InlineNumberCell({
-  value, field, title, onCommit,
-}: {
-  value:    number | null | undefined
-  field:    NumericField
-  title:    string
-  onCommit: (raw: string) => void
-}) {
-  const [draft, setDraft] = useState<string | null>(null)
-  const limits = NUMERIC_LIMITS[field]
-
-  function commit() {
-    const raw = draft
-    setDraft(null)
-    if (raw !== null) onCommit(raw)
-  }
-
-  return (
-    <input
-      type="number"
-      inputMode="numeric"
-      title={title}
-      value={draft ?? String(value ?? '')}
-      min={limits.min}
-      max={limits.max}
-      onChange={e => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === 'Enter')  e.currentTarget.blur()
-        if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur() }
-      }}
-      className="w-12 text-center bg-transparent border border-transparent focus:border-amber/50 rounded focus:outline-none text-sm font-mono tabular-nums text-ink"
-    />
-  )
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -422,16 +138,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   const [copySourceDayId, setCopySourceDayId] = useState<string | null>(null)
   const [copyingDay, setCopyingDay]           = useState(false)
 
-  // ── Copy whole sessions from another Meso in the same block ────────────────────
-  // Replicates entire buổi tập (new days + their exercises) from a different meso
-  // into THIS meso, so a similar mesocycle doesn't have to be rebuilt by hand.
-  // The source meso's exercises are fetched on demand (only the active phase's
-  // rows live in phaseExercises). selectedCrossDayIds = source day_ids to copy.
-  const [copySourcePhaseId, setCopySourcePhaseId]   = useState<string | null>(null)
-  const [selectedCrossDayIds, setSelectedCrossDayIds] = useState<Set<string>>(new Set())
-  const [crossPhaseExercises, setCrossPhaseExercises] = useState<PhaseExerciseRow[]>([])
-  const [loadingCrossPhase, setLoadingCrossPhase]   = useState(false)
-  const [copyingCross, setCopyingCross]             = useState(false)
+  // (Copying whole sessions from another Meso lives in <CrossMesoCopyPanel>.)
   // The last-committed (DB) split config. Used to (a) restore exact saved days
   // when the coach re-selects the saved type after previewing another, and
   // (b) detect "no changes" on save. Split config is a DRAFT: it only persists
@@ -446,19 +153,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   const addPanelRef                       = useRef<HTMLDivElement>(null)
   // Bảng "Thêm ngày": coach chọn SỐ BUỔI cho từng loại rồi thêm tất cả một lượt.
   const [addingDay, setAddingDay]           = useState(false)
-  const [newDayCounts, setNewDayCounts]     = useState<Partial<Record<DayType, number>>>({})
-  // Tên tự đặt cho từng buổi "Khác" được yêu cầu, theo thứ tự. Để trống = tự sinh.
-  const [newOtherLabels, setNewOtherLabels] = useState<string[]>([])
-
-  // Các ngày sắp được thêm theo cấu hình hiện tại của bảng — dùng cho cả dòng xem
-  // trước lẫn lúc bấm "Thêm", nên nhãn hiện ra đúng bằng nhãn được tạo. Ghi nhớ
-  // theo cấu hình để id không đổi giữa các lần render.
-  const pendingNewDays = useMemo(
-    () => (splitType
-      ? buildDayBatch(splitDays, newDayCounts, availableDayTypes(splitType), newOtherLabels)
-      : []),
-    [splitType, splitDays, newDayCounts, newOtherLabels],
-  )
 
   // Save states
   const [saveStatus, setSaveStatus]   = useState<SaveStatus>('idle') // explicit button
@@ -493,12 +187,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   // Coaches can add blank mesos to any block, rename them, or delete them without
   // navigating away.  All mutations are reflected in localBlocks immediately.
   const [addPhaseOpen, setAddPhaseOpen]       = useState(false)
-  const [newPhaseName, setNewPhaseName]       = useState('')
-  const [newPhaseType, setNewPhaseType]       = useState<PhaseType>('training')
-  const [newPhaseDuration, setNewPhaseDuration] = useState('4')
-  const [newPhaseFreq, setNewPhaseFreq]       = useState('3')
-  const [addingPhase, setAddingPhase]         = useState(false)
-  const [addPhaseError, setAddPhaseError]     = useState<string | null>(null)
 
   // Phase inline rename
   const [renamingPhaseId, setRenamingPhaseId]   = useState<string | null>(null)
@@ -543,38 +231,11 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   // itself plus every prescription field (sets / reps / RIR / %1RM / AMRAP /
   // loading style / STT). Pre-filled from the row when opened.
   const [editingExercise, setEditingExercise]   = useState<PhaseExerciseRow | null>(null)
-  const [editFilterPattern, setEditFilterPattern] = useState('')
-  const [editExerciseId, setEditExerciseId]     = useState('')
-  const [editSets, setEditSets]                 = useState('3')
-  const [editRepMin, setEditRepMin]             = useState('8')
-  const [editRepMax, setEditRepMax]             = useState('12')
-  const [editRir, setEditRir]                   = useState('2')
-  const [editLoadingStyle, setEditLoadingStyle] = useState<'horizontal' | 'vertical'>('horizontal')
-  const [editOrderLabel, setEditOrderLabel]     = useState('')
-  const [editIsAmrap, setEditIsAmrap]           = useState(false)
-  const [editTarget1rmPct, setEditTarget1rmPct] = useState('')
-  const [editIsWarmup, setEditIsWarmup]         = useState(false)
-  const [editNotes, setEditNotes]               = useState('')
-  const [editSaving, setEditSaving]             = useState(false)
-  const [editError, setEditError]               = useState<string | null>(null)
 
   // ── Edit phase PARAMETERS modal (duration, frequency, rep zones, type…) ──────
-  // Numeric fields are kept as raw strings while editing so the user can clear a
-  // box to empty; on save, any blank/invalid field falls back to its original
-  // value (captured in pOriginal when the modal opens).
-  type RepZoneDraft = { min: string; max: string; exercise_type?: RepRange['exercise_type'] }
-  const [paramsPhaseId, setParamsPhaseId]     = useState<string | null>(null)
-  const [pOriginal, setPOriginal]             = useState<Phase | null>(null)
-  const [pPhaseType, setPPhaseType]           = useState<PhaseType>('training')
-  const [pDuration, setPDuration]             = useState('4')
-  const [pFreq, setPFreq]                     = useState('3')
-  const [pRepRanges, setPRepRanges]           = useState<RepZoneDraft[]>([])
-  const [pReductionPct, setPReductionPct]     = useState('33')   // maintenance: % of Meso-2 volume
-  const [pIncludesDeload, setPIncludesDeload] = useState(false)
-  const [pMaxRir, setPMaxRir]                 = useState('10')   // active rest
-  const [pMaxWeightPct, setPMaxWeightPct]     = useState('50')   // active rest: % of working weight
-  const [pSaving, setPSaving]                 = useState(false)
-  const [pError, setPError]                   = useState<string | null>(null)
+  // Snapshot of the phase being edited (null = closed). The form state lives in
+  // <PhaseParamsModal>.
+  const [paramsPhase, setParamsPhase] = useState<Phase | null>(null)
 
   // ── Derived values ───────────────────────────────────────────────────────────
   /**
@@ -735,7 +396,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
    *   • No split         → the phase is one repeated session; scopedExercises is
    *     that single session, also summed directly.
    */
-  const SESSION_SET_CAP = 11
   const sessionVolumeByMuscle = (() => {
     const map = new Map<string, number>()
     for (const pe of visibleExercises) {
@@ -869,10 +529,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     setSelectedOrphanIds(new Set())
     setOrphanTargetDayId(null)
     setCopySourceDayId(null)
-    // Reset cross-meso copy selections too.
-    setCopySourcePhaseId(null)
-    setSelectedCrossDayIds(new Set())
-    setCrossPhaseExercises([])
     // Migration 006: sync week_type from newly selected phase
     const newWeekType = (phase?.week_type ?? 'standard') as WeekType
     setPhaseWeekType(newWeekType)
@@ -942,25 +598,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     }
     setLoading(false)
   }
-
-  // Fetch the chosen source meso's exercises for the cross-meso copy widget.
-  // Only the active phase's rows live in phaseExercises, so another meso's
-  // sessions must be loaded on demand when the coach picks it.
-  useEffect(() => {
-    setSelectedCrossDayIds(new Set())
-    if (!copySourcePhaseId) {
-      setCrossPhaseExercises([])
-      return
-    }
-    let cancelled = false
-    setLoadingCrossPhase(true)
-    fetch(`/api/phases/${copySourcePhaseId}/exercises`)
-      .then(r => (r.ok ? r.json() : { exercises: [] }))
-      .then(data => { if (!cancelled) setCrossPhaseExercises(data.exercises ?? []) })
-      .catch(() => { if (!cancelled) setCrossPhaseExercises([]) })
-      .finally(() => { if (!cancelled) setLoadingCrossPhase(false) })
-    return () => { cancelled = true }
-  }, [copySourcePhaseId])
 
   // ── Split config persistence ──────────────────────────────────────────────────
   // NOTE: Split config (type + days) is a DRAFT. Mutations below only update
@@ -1105,61 +742,15 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   }
 
   // ── Day CRUD ──────────────────────────────────────────────────────────────────
-  function openAddDays() {
-    setNewDayCounts({})
-    setNewOtherLabels([])
-    setAddingDay(true)
-  }
-
-  function closeAddDays() {
+  /**
+   * Thêm toàn bộ các ngày đã chọn trong bảng "Thêm ngày" vào split một lượt.
+   * Vẫn là BẢN NHÁP như trước: chỉ vào DB khi coach bấm "Lưu cấu hình giáo án".
+   */
+  function handleAddDays(newDays: SplitDay[]) {
+    if (!splitType || newDays.length === 0) return
+    setSplitDays([...splitDays, ...newDays])
+    setActiveDayId(newDays[0].id)
     setAddingDay(false)
-    setNewDayCounts({})
-    setNewOtherLabels([])
-  }
-
-  /** +1 / −1 số buổi của một loại trong bảng thêm ngày (giới hạn 0…MAX_NEW_DAYS). */
-  function bumpNewDayCount(type: DayType, delta: number) {
-    setNewDayCounts(prev => ({
-      ...prev,
-      [type]: Math.min(MAX_NEW_DAYS_PER_TYPE, Math.max(0, (prev[type] ?? 0) + delta)),
-    }))
-  }
-
-  /**
-   * Thêm trọn một vòng split (mỗi loại buổi chính +1) — lối tắt cho các giáo án
-   * chạy nhiều vòng mỗi tuần, vd PPL 2 vòng: bấm 2 lần là đủ 6 buổi.
-   * Buổi "Khác" không nằm trong vòng vì nó là buổi tự do, không thuộc chu kỳ.
-   */
-  function addSplitCycle() {
-    if (!splitType) return
-    setNewDayCounts(prev => {
-      const next = { ...prev }
-      for (const t of availableDayTypes(splitType)) {
-        if (t === 'other') continue
-        next[t] = Math.min(MAX_NEW_DAYS_PER_TYPE, (next[t] ?? 0) + 1)
-      }
-      return next
-    })
-  }
-
-  /** Ghi tên coach nhập cho buổi "Khác" thứ idx của lô sắp thêm. */
-  function setNewOtherLabelAt(idx: number, value: string) {
-    setNewOtherLabels(prev => {
-      const next = prev.slice()
-      next[idx] = value
-      return next
-    })
-  }
-
-  /**
-   * Thêm toàn bộ các ngày đã chọn vào split một lượt. Vẫn là BẢN NHÁP như trước:
-   * chỉ vào DB khi coach bấm "Lưu cấu hình giáo án".
-   */
-  function handleAddDays() {
-    if (!splitType || pendingNewDays.length === 0) return
-    setSplitDays([...splitDays, ...pendingNewDays])
-    setActiveDayId(pendingNewDays[0].id)
-    closeAddDays()
   }
 
   function startRenameDay(day: SplitDay) {
@@ -1320,124 +911,17 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     ))
   }
 
-  // ── Edit exercise ──────────────────────────────────────────────────────────────
-  /** Open the edit modal pre-filled with the row's current values. */
-  function startEditExercise(pe: PhaseExerciseRow) {
-    setEditingExercise(pe)
-    setEditExerciseId(pe.exercise_id)
-    setEditFilterPattern(pe.exercise?.movement_pattern_id ?? '')
-    setEditSets(String(pe.target_sets ?? 3))
-    setEditRepMin(String(pe.target_rep_min ?? 8))
-    setEditRepMax(String(pe.target_rep_max ?? 12))
-    setEditRir(String(pe.rir_target ?? 2))
-    setEditLoadingStyle(pe.loading_style === 'vertical' ? 'vertical' : 'horizontal')
-    setEditOrderLabel(pe.order_label ?? '')
-    setEditIsAmrap(pe.is_amrap ?? false)
-    setEditTarget1rmPct(pe.target_percentage_1rm != null ? String(pe.target_percentage_1rm) : '')
-    setEditIsWarmup(pe.is_warmup ?? false)
-    setEditNotes(pe.notes ?? '')
-    setEditError(null)
-  }
-
-  /** Persist all edited fields in a single PATCH; replace the row from the join. */
-  async function handleSaveEdit() {
-    if (!editingExercise || !editExerciseId) return
-
-    // Blank fields keep whatever is already stored — clearing a box must never
-    // silently rewrite the prescription to a default like 1.
-    const repMin = parseNumericField('target_rep_min', editRepMin, editingExercise.target_rep_min ?? 8)
-    const repMax = parseNumericField('target_rep_max', editRepMax, editingExercise.target_rep_max ?? 12)
-    if (repMin > repMax) {
-      setEditError('Rep tối thiểu không được lớn hơn Rep tối đa.')
-      return
-    }
-
-    setEditSaving(true)
-    setEditError(null)
-
-    const res = await fetch(
-      `/api/phases/${selectedPhaseId}/exercises?phase_exercise_id=${editingExercise.id}`,
-      {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          exercise_id:    editExerciseId,
-          target_sets:    parseNumericField('target_sets', editSets, editingExercise.target_sets ?? 3),
-          target_rep_min: repMin,
-          target_rep_max: repMax,
-          order_label:    editOrderLabel.trim().toUpperCase() || null,
-          loading_style:  editLoadingStyle,
-
-          // Context-aware periodisation fields (mirror handleAdd):
-          //   Strength/Peaking → prescribe by %1RM, RIR & AMRAP suppressed
-          //   Hypertrophy      → prescribe by RIR, AMRAP allowed
-          rir_target:            isStrengthContext ? null : (parseInt(editRir) || 2),
-          is_amrap:              isStrengthContext ? false : editIsAmrap,
-          // %1RM is an always-available optional field (any phase). Empty = off.
-          target_percentage_1rm: editTarget1rmPct ? (parseInt(editTarget1rmPct) || null) : null,
-          // migration 012 — independent warmup marker
-          is_warmup:             editIsWarmup,
-          // Coach note shown to the athlete (phase_exercises.notes). Empty = clear.
-          notes:                 editNotes.trim() || null,
-        }),
-      },
-    )
-
-    const data = await res.json()
-    setEditSaving(false)
-
-    if (!res.ok) {
-      setEditError(data.error ?? 'Không thể cập nhật bài tập')
-      return
-    }
-
-    setPhaseExercises(prev =>
-      prev.map(pe => pe.id === editingExercise.id ? data.exercise : pe),
-    )
-    setEditingExercise(null)
-  }
-
   // ── Meso (phase) CRUD ─────────────────────────────────────────────────────────
 
-  async function handleAddPhase() {
-    if (!newPhaseName.trim() || !selectedBlockId) return
-    setAddingPhase(true)
-    setAddPhaseError(null)
-
-    const res = await fetch('/api/phases', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        block_id:           selectedBlockId,
-        name:               newPhaseName.trim(),
-        phase_type:         newPhaseType,
-        duration_weeks:     parseInt(newPhaseDuration) || 4,
-        frequency_per_week: parseInt(newPhaseFreq)     || 3,
-      }),
-    })
-
-    const data = await res.json()
-    setAddingPhase(false)
-
-    if (!res.ok) {
-      setAddPhaseError(data.error ?? 'Không thể tạo giai đoạn')
-      return
-    }
-
-    const newPhase = data.phase as Phase
-    // Optimistic: add the new phase to localBlocks, then switch to it
+  /** <AddPhaseModal> created a meso: add it to the block, then switch to it. */
+  function handlePhaseCreated(newPhase: Phase) {
     updateBlocks(prev => prev.map(b =>
       b.id === selectedBlockId
         ? { ...b, phases: [...(b.phases ?? []), newPhase] }
         : b,
     ))
     setSelectedPhaseId(newPhase.id)
-    // Reset modal
     setAddPhaseOpen(false)
-    setNewPhaseName('')
-    setNewPhaseType('training')
-    setNewPhaseDuration('4')
-    setNewPhaseFreq('3')
   }
 
   function startRenamePhase(phase: Phase) {
@@ -1469,97 +953,13 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   }
 
   // ── Edit phase parameters ────────────────────────────────────────────────────
-  const EXERCISE_TYPE_OPTIONS = [
-    { value: '',           label: 'Mọi loại bài' },
-    { value: 'compound',   label: 'Phức hợp' },
-    { value: 'machine',    label: 'Máy tập' },
-    { value: 'cable',      label: 'Cáp' },
-    { value: 'bodyweight', label: 'Trọng lượng cơ thể' },
-    { value: 'dumbbell',   label: 'Tạ đơn' },
-  ]
-
-  function openPhaseParams(phase: Phase) {
-    setParamsPhaseId(phase.id)
-    setPOriginal(phase)
-    setPPhaseType(phase.phase_type)
-    setPDuration(String(phase.duration_weeks))
-    setPFreq(String(phase.frequency_per_week))
-    setPRepRanges(Array.isArray(phase.rep_ranges)
-      ? phase.rep_ranges.map(r => ({ min: String(r.min), max: String(r.max), exercise_type: r.exercise_type }))
-      : [])
-    setPReductionPct(String(Math.round((phase.target_set_reduction_factor ?? 1) * 100)))
-    setPIncludesDeload(!!phase.includes_deload)
-    setPMaxRir(phase.max_rir != null ? String(phase.max_rir) : '10')
-    setPMaxWeightPct(phase.max_weight_percent != null ? String(Math.round(phase.max_weight_percent * 100)) : '50')
-    setPError(null)
-  }
-
-  function addRepZone() {
-    setPRepRanges(prev => [...prev, { min: '8', max: '12' }])
-  }
-  function updateRepZone(idx: number, patch: Partial<RepZoneDraft>) {
-    setPRepRanges(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r))
-  }
-  function removeRepZone(idx: number) {
-    setPRepRanges(prev => prev.filter((_, i) => i !== idx))
-  }
-
-  async function savePhaseParams() {
-    if (!paramsPhaseId) return
-    setPSaving(true)
-    setPError(null)
-
-    const orig = pOriginal
-    // Parse an integer; if blank/invalid, fall back to the supplied old value.
-    const parseOr = (s: string, fallback: number) => {
-      const n = parseInt(s, 10)
-      return Number.isNaN(n) ? fallback : n
-    }
-
-    const cleanRanges: RepRange[] = pRepRanges
-      .map((r, i) => {
-        const origR = orig?.rep_ranges?.[i]
-        const min = parseOr(r.min, origR?.min ?? 0)
-        const max = parseOr(r.max, origR?.max ?? 0)
-        return r.exercise_type ? { min, max, exercise_type: r.exercise_type } : { min, max }
-      })
-      .filter(r => r.min > 0 && r.max >= r.min)
-
-    const payload = {
-      phase_type:                  pPhaseType,
-      duration_weeks:              Math.max(1, parseOr(pDuration, orig?.duration_weeks ?? 1)),
-      frequency_per_week:          Math.max(1, parseOr(pFreq, orig?.frequency_per_week ?? 1)),
-      rep_ranges:                  cleanRanges,
-      target_set_reduction_factor: pPhaseType === 'maintenance'
-        ? (Math.max(1, parseOr(pReductionPct, Math.round((orig?.target_set_reduction_factor ?? 1) * 100))) / 100)
-        : 1.0,
-      includes_deload:             pPhaseType === 'maintenance' ? pIncludesDeload : false,
-      max_rir:                     pPhaseType === 'active_rest' ? parseOr(pMaxRir, orig?.max_rir ?? 10) : null,
-      max_weight_percent:          pPhaseType === 'active_rest'
-        ? (Math.max(1, parseOr(pMaxWeightPct, Math.round((orig?.max_weight_percent ?? 0.5) * 100))) / 100)
-        : null,
-    }
-
-    // Optimistic local update so the info bar + timeline reflect changes at once.
+  /** Optimistic local update so the info bar + timeline reflect changes at once. */
+  function applyPhaseParams(phaseId: string, patch: PhaseParamsPatch) {
     updateBlocks(prev => prev.map(b =>
       b.id === selectedBlockId
-        ? { ...b, phases: (b.phases ?? []).map(p => p.id === paramsPhaseId ? { ...p, ...payload } : p) }
+        ? { ...b, phases: (b.phases ?? []).map(p => p.id === phaseId ? { ...p, ...patch } : p) }
         : b,
     ))
-
-    const res = await fetch(`/api/phases/${paramsPhaseId}`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-    })
-
-    setPSaving(false)
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}))
-      setPError(d.error ?? 'Lưu thất bại. Vui lòng thử lại.')
-      return
-    }
-    setParamsPhaseId(null)
   }
 
   async function doDeletePhase(phaseId: string) {
@@ -1995,15 +1395,10 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
   // persisted when the coach saves the config) and clone all of that day's
   // exercises into it. Lets a coach reuse e.g. every Fullbody session from Meso 1
   // when building Meso 2 instead of rebuilding each one by hand.
-  async function copyCrossSessions() {
-    if (!splitType || !copySourcePhaseId || selectedCrossDayIds.size === 0) return
-    const srcPhase = phases.find(p => p.id === copySourcePhaseId)
-    const srcDays  = (srcPhase?.split_days ?? []) as SplitDay[]
-    // Preserve the source meso's day order; only days the coach ticked.
-    const chosen = srcDays.filter(d => selectedCrossDayIds.has(d.id))
-    if (chosen.length === 0) return
-
-    setCopyingCross(true)
+  // `chosen` = the source days ticked in <CrossMesoCopyPanel> (in the source
+  // meso's own order); `sourceRows` = that meso's exercises.
+  async function copyCrossSessions(chosen: SplitDay[], sourceRows: PhaseExerciseRow[]) {
+    if (!splitType || chosen.length === 0) return
 
     // Build the new days first. Keep the source meso's own session names so the
     // copy is recognisable; only disambiguate on an exact-label collision against
@@ -2024,7 +1419,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
     // Clone each source day's exercises into its freshly-created day.
     for (const { newId, sourceDayId } of created) {
       // Copy the source meso's BASE rows (week_number null) for that day.
-      const source = crossPhaseExercises.filter(
+      const source = sourceRows.filter(
         pe => pe.day_id === sourceDayId && (pe.week_number ?? null) === null,
       )
       await copyExercisesIntoDay(source, newId)
@@ -2032,10 +1427,6 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
 
     // Jump to the first newly-added day so the coach sees the result.
     if (created[0]) setActiveDayId(created[0].newId)
-    setCopySourcePhaseId(null)
-    setSelectedCrossDayIds(new Set())
-    setCrossPhaseExercises([])
-    setCopyingCross(false)
   }
 
   // ── Per-week customise / reset (migration 011) ───────────────────────────────
@@ -2175,7 +1566,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* "+ Thêm Meso" button */}
           <button
             type="button"
-            onClick={() => { setNewPhaseName(''); setAddPhaseError(null); setAddPhaseOpen(true) }}
+            onClick={() => setAddPhaseOpen(true)}
             className="rounded-lg border border-dashed border-amber/40 px-3.5 py-2 text-xs font-semibold text-amber/60 hover:border-amber hover:text-amber hover:bg-amber/4 transition-all flex items-center gap-1"
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2200,7 +1591,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           </div>
           <button
             type="button"
-            onClick={() => { setNewPhaseName(''); setAddPhaseError(null); setAddPhaseOpen(true) }}
+            onClick={() => setAddPhaseOpen(true)}
             className="rounded-xl bg-amber text-paper font-semibold px-6 py-2.5 text-sm hover:bg-amber/90 active:scale-[0.98] transition-all"
           >
             + Thêm giai đoạn đầu tiên
@@ -2224,7 +1615,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
             {/* Sửa toàn bộ thông số giai đoạn (khoảng reps, độ dài, tần suất…) */}
             <button
               type="button"
-              onClick={() => openPhaseParams(selectedPhase)}
+              onClick={() => setParamsPhase(selectedPhase)}
               title="Chỉnh sửa thông số giai đoạn"
               className="inline-flex items-center gap-1 rounded-md border border-ink/15 px-2 py-1 text-[11px] font-semibold text-ink/60 hover:border-amber hover:text-amber hover:bg-amber/5 transition-colors"
             >
@@ -2660,7 +2051,7 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
 
                     {/* Add day button — mở bảng thêm nhiều ngày một lượt */}
                     <button
-                      onClick={() => (addingDay ? closeAddDays() : openAddDays())}
+                      onClick={() => setAddingDay(v => !v)}
                       className={cn(
                         'rounded-lg border border-dashed px-3 py-1.5 text-xs font-medium transition-colors',
                         addingDay
@@ -2674,122 +2065,12 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
 
                   {/* ── Bảng thêm nhiều ngày tập cùng lúc ── */}
                   {addingDay && (
-                    <div className="mt-3 rounded-xl border border-amber/25 bg-amber/[0.04] px-4 py-3.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-ink">
-                          Thêm nhiều ngày tập cùng lúc
-                        </p>
-                        {/* Lối tắt: +1 vòng split (bỏ qua buổi "Khác") */}
-                        {availableDayTypes(splitType).some(t => t !== 'other') && (
-                          <button
-                            onClick={addSplitCycle}
-                            title="Mỗi loại buổi chính +1 — bấm 2 lần cho giáo án 2 vòng/tuần"
-                            className="rounded-lg border border-amber/35 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber hover:bg-amber/10 transition-colors"
-                          >
-                            + 1 vòng split
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Bộ đếm số buổi theo từng loại */}
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        {availableDayTypes(splitType).map(t => {
-                          const count = newDayCounts[t] ?? 0
-                          return (
-                            <div
-                              key={t}
-                              className={cn(
-                                'flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 transition-colors',
-                                count > 0 ? 'border-amber/45' : 'border-ink/10',
-                              )}
-                            >
-                              <span className="flex-1 truncate text-xs font-medium text-ink/70">
-                                {DAY_TYPE_LABELS[t]}
-                              </span>
-                              <button
-                                onClick={() => bumpNewDayCount(t, -1)}
-                                disabled={count === 0}
-                                title="Bớt 1 buổi"
-                                className="h-6 w-6 rounded flex items-center justify-center text-sm font-bold text-ink/45 hover:bg-ink/8 hover:text-ink disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                              >
-                                −
-                              </button>
-                              <span className={cn(
-                                'w-5 text-center text-xs font-bold tabular-nums',
-                                count > 0 ? 'text-amber' : 'text-ink/25',
-                              )}>
-                                {count}
-                              </span>
-                              <button
-                                onClick={() => bumpNewDayCount(t, 1)}
-                                disabled={count >= MAX_NEW_DAYS_PER_TYPE}
-                                title="Thêm 1 buổi"
-                                className="h-6 w-6 rounded flex items-center justify-center text-sm font-bold text-ink/45 hover:bg-ink/8 hover:text-ink disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                              >
-                                +
-                              </button>
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      {/* Buổi "Khác" → cho phép coach nhập tên buổi tự do, mỗi buổi một ô */}
-                      {(newDayCounts.other ?? 0) > 0 && (
-                        <div className="mt-2.5 space-y-1.5">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink/35">
-                            Tên các buổi “Khác” — để trống sẽ tự đặt tên
-                          </p>
-                          {Array.from({ length: newDayCounts.other ?? 0 }).map((_, i) => (
-                            <input
-                              key={i}
-                              type="text"
-                              value={newOtherLabels[i] ?? ''}
-                              onChange={e => setNewOtherLabelAt(i, e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter')  handleAddDays()
-                                if (e.key === 'Escape') closeAddDays()
-                              }}
-                              autoFocus={i === 0}
-                              placeholder={`Tên buổi ${i + 1}…`}
-                              className="w-full rounded border border-ink/15 bg-white px-2 py-1 text-xs text-ink focus:border-amber outline-none"
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Xem trước + hành động */}
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <p className="min-w-0 text-[11px] leading-relaxed text-ink/50">
-                          {pendingNewDays.length === 0 ? (
-                            'Chọn số buổi cho từng loại rồi bấm Thêm.'
-                          ) : (
-                            <>
-                              Sẽ thêm{' '}
-                              <span className="font-semibold text-ink/75">{pendingNewDays.length}</span>
-                              {' '}ngày:{' '}
-                              <span className="text-ink/70">
-                                {pendingNewDays.map(d => d.label).join(' · ')}
-                              </span>
-                            </>
-                          )}
-                        </p>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            onClick={handleAddDays}
-                            disabled={pendingNewDays.length === 0}
-                            className="rounded px-2 py-1 text-xs font-semibold text-herb hover:bg-herb/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          >
-                            {pendingNewDays.length > 0 ? `Thêm ${pendingNewDays.length} ngày` : 'Thêm'}
-                          </button>
-                          <button
-                            onClick={closeAddDays}
-                            className="rounded px-1.5 py-1 text-xs text-ink/40 hover:bg-ink/5 transition-colors"
-                          >
-                            Huỷ
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                    <AddDaysPanel
+                      splitType={splitType}
+                      splitDays={splitDays}
+                      onAdd={handleAddDays}
+                      closeAddDays={() => setAddingDay(false)}
+                    />
                   )}
 
                   {/* Active day description */}
@@ -2823,84 +2104,13 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* ── WEEKLY VOLUME SUMMARY ──────────────────────────────────── */}
           {/* ════════════════════════════════════════════════════════════════ */}
           {weeklyVolumeByMuscle.length > 0 && !loading && (
-            <div className="rounded-xl border border-ink/8 bg-white overflow-hidden">
-
-              {/* ── Header ── */}
-              <div className="px-5 py-3.5 border-b border-ink/6 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-ink/35">
-                    Volume tuần / nhóm cơ — {selectedPhase.name}
-                  </p>
-                  {!splitType && selectedPhase.frequency_per_week > 1 && (
-                    <p className="text-[10px] text-amber/70 mt-0.5">
-                      Nhân ×{selectedPhase.frequency_per_week}/tuần (chưa chia lịch)
-                    </p>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  <span className="font-mono text-xl font-bold text-ink leading-none tabular-nums">
-                    {rawWeeklySets}
-                  </span>
-                  <span className="text-xs text-ink/40 ml-1.5">hiệp/tuần</span>
-                </div>
-              </div>
-
-              {/* ── Muscle group rows ── */}
-              <div className="px-5 py-4 space-y-3">
-                {weeklyVolumeByMuscle.map(({ name, sets }) => {
-                  const barPct = maxMuscleSets > 0
-                    ? Math.round((sets / maxMuscleSets) * 100)
-                    : 0
-                  const { barClass, textClass, rangeLabel } = getVolumeColor(sets)
-                  return (
-                    <div key={name} className="flex items-center gap-3">
-                      {/* Muscle group name */}
-                      <p className="w-24 sm:w-44 shrink-0 text-xs font-medium text-ink/65 truncate">
-                        {name}
-                      </p>
-
-                      {/* Progress bar */}
-                      <div className="flex-1 h-1.5 rounded-full bg-ink/6 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${barClass}`}
-                          style={{ width: `${barPct}%` }}
-                        />
-                      </div>
-
-                      {/* Set count + range label */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span
-                          className={`font-mono text-xs font-semibold tabular-nums w-8 text-right ${textClass}`}
-                        >
-                          {formatSets(sets)}
-                        </span>
-                        <span className="text-[10px] text-ink/30 w-[52px] leading-tight">
-                          {rangeLabel}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* ── Legend ── */}
-              <div className="px-5 py-2.5 border-t border-ink/6 flex items-center gap-x-5 gap-y-1.5 flex-wrap">
-                <span className="text-[9px] uppercase tracking-widest text-ink/20 font-semibold">
-                  Helms / RP
-                </span>
-                {([
-                  { cls: 'bg-ink/25',    label: '< 6 — Sub-MEV' },
-                  { cls: 'bg-herb',      label: '6–11 — MEV'    },
-                  { cls: 'bg-amber',     label: '12–19 — MAV'   },
-                  { cls: 'bg-danger/65', label: '≥ 20 — MRV ↑'  },
-                ] as const).map(({ cls, label }) => (
-                  <div key={label} className="flex items-center gap-1.5">
-                    <div className={`h-1.5 w-5 rounded-full ${cls}`} />
-                    <span className="text-[9px] text-ink/30">{label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <WeeklyVolumeSummary
+              weeklyVolumeByMuscle={weeklyVolumeByMuscle}
+              selectedPhase={selectedPhase}
+              splitType={splitType}
+              rawWeeklySets={rawWeeklySets}
+              maxMuscleSets={maxMuscleSets}
+            />
           )}
 
           {/* ════════════════════════════════════════════════════════════════ */}
@@ -2908,36 +2118,11 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
           {/* Cảnh báo khi một nhóm cơ vượt quá 11 hiệp trong một buổi tập. */}
           {/* ════════════════════════════════════════════════════════════════ */}
           {overloadedMuscles.length > 0 && !loading && (
-            <div className="rounded-xl border border-amber/40 bg-amber/8 px-4 py-3">
-              <div className="flex items-start gap-2.5">
-                <span className="text-amber text-base leading-none mt-0.5">⚠</span>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-amber">
-                    Quá tải buổi tập
-                    {splitType && activeDay ? ` — ${activeDay.label}` : ''}
-                  </p>
-                  <p className="text-[11px] text-ink/60 mt-1 leading-relaxed">
-                    Nghiên cứu mới khuyến nghị mỗi nhóm cơ không quá{' '}
-                    <span className="font-semibold text-ink/75">{SESSION_SET_CAP} hiệp</span>{' '}
-                    trong một buổi — vượt ngưỡng có thể làm giảm hiệu quả tăng cơ.
-                    Hãy cân nhắc giảm bớt hoặc chuyển sang buổi khác:
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {overloadedMuscles.map(({ name, sets }) => (
-                      <span
-                        key={name}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-amber/40 bg-white px-2.5 py-0.5 text-[11px] font-medium text-amber"
-                      >
-                        {name}
-                        <span className="font-mono font-bold tabular-nums">
-                          {formatSets(sets)} hiệp
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SessionOverloadWarning
+              overloadedMuscles={overloadedMuscles}
+              splitType={splitType}
+              activeDay={activeDay}
+            />
           )}
 
           {/* ════════════════════════════════════════════════════════════════ */}
@@ -3088,97 +2273,12 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
               same block. Pick a meso, tick the sessions to bring over (or all),
               then "Sao chép" creates them in THIS meso. New days are draft until
               the coach presses "Lưu cấu hình giáo án". */}
-          {splitType && !viewingUncustomizedWeek && (() => {
-            const otherPhases = phases.filter(p => p.id !== selectedPhaseId)
-            if (otherPhases.length === 0) return null
-
-            // Sessions of the chosen source meso (in its own order) that actually
-            // contain exercises — only those are worth copying.
-            const srcPhase = phases.find(p => p.id === copySourcePhaseId) ?? null
-            const srcDays  = (srcPhase?.split_days ?? []) as SplitDay[]
-            const crossDays = srcDays
-              .map(d => ({
-                ...d,
-                count: crossPhaseExercises.filter(pe => pe.day_id === d.id).length,
-              }))
-              .filter(d => d.count > 0)
-            const allSelected = crossDays.length > 0 &&
-              crossDays.every(d => selectedCrossDayIds.has(d.id))
-
-            return (
-              <div className="rounded-xl border border-ink/8 bg-ink/3 px-4 py-2.5 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-ink/55">
-                    Sao chép nguyên buổi tập từ Meso khác sang Meso này:
-                  </span>
-                  <select
-                    value={copySourcePhaseId ?? ''}
-                    onChange={e => setCopySourcePhaseId(e.target.value || null)}
-                    className="rounded-lg border border-ink/15 bg-white px-2.5 py-1 text-xs text-ink focus:outline-none focus:border-amber"
-                  >
-                    <option value="">— Chọn Meso nguồn —</option>
-                    {otherPhases.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {copySourcePhaseId && (
-                  loadingCrossPhase ? (
-                    <p className="text-xs text-ink/45">Đang tải các buổi tập…</p>
-                  ) : crossDays.length === 0 ? (
-                    <p className="text-xs text-ink/45">Meso này chưa có buổi tập nào có bài.</p>
-                  ) : (
-                    <>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCrossDayIds(
-                            allSelected ? new Set() : new Set(crossDays.map(d => d.id)),
-                          )}
-                          className="text-xs font-semibold text-ink/55 hover:text-ink px-2 py-1 rounded hover:bg-ink/5 transition-colors"
-                        >
-                          {allSelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
-                        </button>
-                        {crossDays.map(d => {
-                          const checked = selectedCrossDayIds.has(d.id)
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() => setSelectedCrossDayIds(prev => {
-                                const next = new Set(prev)
-                                if (next.has(d.id)) next.delete(d.id); else next.add(d.id)
-                                return next
-                              })}
-                              className={cn(
-                                'text-xs px-2.5 py-1 rounded-lg border transition-colors',
-                                checked
-                                  ? 'bg-amber/15 text-amber border-amber/40 font-semibold'
-                                  : 'bg-white text-ink/70 border-ink/15 hover:border-ink/30',
-                              )}
-                            >
-                              {checked ? '✓ ' : ''}{d.label} ({d.count} bài)
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => void copyCrossSessions()}
-                        disabled={selectedCrossDayIds.size === 0 || copyingCross}
-                      >
-                        {copyingCross
-                          ? 'Đang sao chép…'
-                          : `Sao chép ${selectedCrossDayIds.size || ''} buổi`.trim()}
-                      </Button>
-                    </>
-                  )
-                )}
-              </div>
-            )
-          })()}
+          <CrossMesoCopyPanel
+            visible={!!splitType && !viewingUncustomizedWeek}
+            phases={phases}
+            selectedPhaseId={selectedPhaseId}
+            onCopy={copyCrossSessions}
+          />
 
           {/* Orphan-recovery banner — exercises that lost their day (e.g. from a
               previous split-type change). They still exist; re-attach them here.
@@ -3309,192 +2409,19 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
               </CardBody>
             </Card>
           ) : (
-            <div className="w-full overflow-x-auto rounded-xl border border-ink/8 bg-white">
-              {/*
-               * min-w ensures the STT + all columns render without wrapping.
-               * table-fixed + explicit col widths keeps layout stable on resize.
-               */}
-              <table className="w-full text-sm min-w-[680px]">
-                <thead className="border-b border-ink/8">
-                  <tr className="text-xs text-ink/40 uppercase tracking-wide">
-                    {/* STT — leftmost, shows order_label badge */}
-                    <th className="text-center px-3 py-3 w-[52px]">
-                      STT
-                      <span
-                        title="Nhấp vào ô STT để chỉnh sửa mã xếp lịch"
-                        className="ml-1 cursor-help text-ink/25">
-                        ✎
-                      </span>
-                    </th>
-                    <th className="text-left px-5 py-3">Bài tập</th>
-                    <th className="text-left px-5 py-3">Chuỗi CĐ</th>
-                    <th className="text-center px-4 py-3">Hiệp</th>
-                    <th className="text-center px-4 py-3">Rep Min</th>
-                    <th className="text-center px-4 py-3">Rep Max</th>
-                    <th className="text-center px-4 py-3">RIR</th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink/5">
-                  {visibleExercises.map((pe, idx) => (
-                    <tr key={pe.id} className="group hover:bg-ink/2">
-
-                      {/* ── STT column ── */}
-                      <td className="px-3 py-2.5 text-center">
-                        {editingOLId === pe.id ? (
-                          <input
-                            type="text"
-                            value={editingOLValue}
-                            onChange={e => setEditingOLValue(e.target.value.toUpperCase())}
-                            onBlur={() => void commitOrderLabel(pe.id)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter')  void commitOrderLabel(pe.id)
-                              if (e.key === 'Escape') setEditingOLId(null)
-                            }}
-                            autoFocus
-                            maxLength={4}
-                            placeholder="A1"
-                            className="w-12 text-center rounded-md border border-amber px-1 py-0.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-amber/50"
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            title="Nhấp để chỉnh sửa mã STT"
-                            onClick={() => startEditOrderLabel(pe)}
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md border font-bold text-xs px-2 py-0.5 min-w-[32px] transition-all',
-                              pe.order_label
-                                ? orderBadgeClass(pe.order_label)
-                                : 'border-dashed border-ink/20 text-ink/25 hover:border-ink/40 hover:text-ink/45',
-                            )}
-                          >
-                            {pe.order_label ?? '—'}
-                          </button>
-                        )}
-                      </td>
-
-                      {/* ── Exercise name + type ── */}
-                      <td className="px-5 py-2.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-medium text-ink">{pe.exercise?.name ?? '—'}</p>
-                          {pe.is_amrap && (
-                            <span className="inline-flex items-center rounded-full bg-amber/15 border border-amber/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber leading-none">
-                              🔥 AMRAP
-                            </span>
-                          )}
-                          {pe.target_percentage_1rm != null && (
-                            <span className="inline-flex items-center rounded-full bg-danger/10 border border-danger/25 px-1.5 py-0.5 text-[9px] font-bold font-mono text-danger leading-none">
-                              {pe.target_percentage_1rm}% 1RM
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-ink/40">{pe.exercise?.type}</p>
-                        {pe.is_warmup && (
-                          <p className="text-[10px] font-semibold text-sky-600/80 mt-0.5">
-                            🤸 Bài khởi động
-                          </p>
-                        )}
-                        {pe.exercise?.video_url && (
-                          <div className="mt-1">
-                            <TechniqueButton url={pe.exercise.video_url} exerciseName={pe.exercise?.name ?? 'Bài tập'} />
-                          </div>
-                        )}
-                        {pe.notes && (
-                          <p className="text-[11px] text-ink/50 mt-1 leading-snug whitespace-pre-line">
-                            📝 {pe.notes}
-                          </p>
-                        )}
-                      </td>
-
-                      {/* ── Movement pattern ── */}
-                      <td className="px-5 py-2.5 text-ink/50 text-xs">
-                        {(pe.exercise?.movement_pattern as any)?.name ?? '—'}
-                      </td>
-
-                      {/* ── Inline numeric fields ── */}
-                      <td className="px-4 py-2.5 text-center">
-                        <InlineNumberCell
-                          value={pe.target_sets} field="target_sets" title="Số hiệp"
-                          onCommit={raw => void handleUpdateNumeric(pe, 'target_sets', raw)}
-                        />
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <InlineNumberCell
-                          value={pe.target_rep_min} field="target_rep_min" title="Rep tối thiểu"
-                          onCommit={raw => void handleUpdateNumeric(pe, 'target_rep_min', raw)}
-                        />
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <InlineNumberCell
-                          value={pe.target_rep_max} field="target_rep_max" title="Rep tối đa"
-                          onCommit={raw => void handleUpdateNumeric(pe, 'target_rep_max', raw)}
-                        />
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <InlineNumberCell
-                          value={pe.rir_target} field="rir_target" title="RIR mục tiêu"
-                          onCommit={raw => void handleUpdateNumeric(pe, 'rir_target', raw)}
-                        />
-                      </td>
-
-                      {/* ── Edit / Delete actions ── */}
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center justify-end gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                          {/* Di chuyển lên */}
-                          <button
-                            type="button"
-                            onClick={() => void moveExercise(pe.id, -1)}
-                            disabled={idx === 0}
-                            title="Di chuyển lên"
-                            className="h-7 w-7 rounded flex items-center justify-center text-ink/40 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                            </svg>
-                          </button>
-                          {/* Di chuyển xuống */}
-                          <button
-                            type="button"
-                            onClick={() => void moveExercise(pe.id, 1)}
-                            disabled={idx === visibleExercises.length - 1}
-                            title="Di chuyển xuống"
-                            className="h-7 w-7 rounded flex items-center justify-center text-ink/40 hover:text-ink hover:bg-ink/8 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          {/* Sửa — bút chì */}
-                          <button
-                            type="button"
-                            onClick={() => startEditExercise(pe)}
-                            title="Sửa bài tập"
-                            className="h-7 w-7 rounded flex items-center justify-center text-ink/40 hover:text-amber hover:bg-amber/8 transition-colors"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                            </svg>
-                          </button>
-                          {/* Xoá — thùng rác */}
-                          <button
-                            type="button"
-                            onClick={() => handleRemove(pe.id)}
-                            title="Xoá bài tập"
-                            className="h-7 w-7 rounded flex items-center justify-center text-danger/50 hover:text-danger hover:bg-danger/8 transition-colors"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ExerciseTable
+              visibleExercises={visibleExercises}
+              editingOLId={editingOLId}
+              editingOLValue={editingOLValue}
+              setEditingOLValue={setEditingOLValue}
+              setEditingOLId={setEditingOLId}
+              commitOrderLabel={commitOrderLabel}
+              startEditOrderLabel={startEditOrderLabel}
+              handleUpdateNumeric={handleUpdateNumeric}
+              moveExercise={moveExercise}
+              startEditExercise={setEditingExercise}
+              handleRemove={handleRemove}
+            />
           )}
 
           {/* ════════════════════════════════════════════════════════════════ */}
@@ -3921,89 +2848,12 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       )}
 
       {/* ── Add Phase (Meso) modal ───────────────────────────────────────── */}
-      <Modal
+      <AddPhaseModal
         open={addPhaseOpen}
-        onClose={() => { setAddPhaseOpen(false); setAddPhaseError(null) }}
-        title="Thêm Giai Đoạn Mới"
-        size="sm"
-      >
-        <div className="space-y-4">
-          <Input
-            label="Tên giai đoạn"
-            value={newPhaseName}
-            onChange={e => setNewPhaseName(e.target.value)}
-            placeholder="VD: Meso 1 — Nền tảng"
-          />
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold font-sans uppercase tracking-wide text-ink/60">
-              Loại giai đoạn
-            </label>
-            <select
-              value={newPhaseType}
-              onChange={e => setNewPhaseType(e.target.value as PhaseType)}
-              className="rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-            >
-              <option value="training">🏋️ Tập luyện (Training)</option>
-              <option value="maintenance">🔄 Duy trì (Maintenance)</option>
-              <option value="active_rest">🧘 Nghỉ tích cực (Active Rest)</option>
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Thời lượng (tuần)"
-              type="number"
-              min="1"
-              max="24"
-              value={newPhaseDuration}
-              onChange={e => setNewPhaseDuration(e.target.value)}
-            />
-            <Input
-              label="Tần suất (/tuần)"
-              type="number"
-              min="1"
-              max="7"
-              value={newPhaseFreq}
-              onChange={e => setNewPhaseFreq(e.target.value)}
-            />
-          </div>
-
-          <div className="rounded-lg border border-ink/8 bg-ink/2 px-3 py-2.5">
-            <p className="text-[11px] text-ink/45 leading-snug">
-              Vùng reps, RIR, split type và các thông số chi tiết khác có thể
-              được cấu hình sau khi tạo giai đoạn.
-            </p>
-          </div>
-
-          {addPhaseError && (
-            <p className="rounded-lg bg-danger/8 border border-danger/20 px-3 py-2 text-sm text-danger">
-              {addPhaseError}
-            </p>
-          )}
-
-          <div className="flex gap-2 pt-1">
-            <Button
-              type="button"
-              variant="primary"
-              loading={addingPhase}
-              onClick={() => void handleAddPhase()}
-              disabled={!newPhaseName.trim() || addingPhase}
-              className="flex-1"
-            >
-              Tạo giai đoạn
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => { setAddPhaseOpen(false); setAddPhaseError(null) }}
-              disabled={addingPhase}
-            >
-              Huỷ
-            </Button>
-          </div>
-        </div>
-      </Modal>
+        onClose={() => setAddPhaseOpen(false)}
+        selectedBlockId={selectedBlockId}
+        onCreated={handlePhaseCreated}
+      />
 
       {/* ── Nhập bài tập của một buổi từ Excel ───────────────────────────── */}
       {selectedPhaseId && (
@@ -4037,234 +2887,18 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       )}
 
       {/* ── Edit exercise modal ──────────────────────────────────────────── */}
-      <Modal
-        open={editingExercise !== null}
+      <EditExerciseModal
+        editingExercise={editingExercise}
         onClose={() => setEditingExercise(null)}
-        title="Sửa bài tập"
-        size="lg"
-      >
-        {editingExercise && (
-          <div className="space-y-5">
-
-            {/* ── Exercise picker ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                  Chuỗi Chuyển Động
-                </label>
-                <select
-                  value={editFilterPattern}
-                  onChange={e => {
-                    setEditFilterPattern(e.target.value)
-                    // Nếu bài tập đang chọn không thuộc chuỗi mới → bỏ chọn
-                    if (e.target.value) {
-                      const stillValid = exercises.some(
-                        ex => ex.id === editExerciseId && ex.movement_pattern_id === e.target.value,
-                      )
-                      if (!stillValid) setEditExerciseId('')
-                    }
-                  }}
-                  className="rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                >
-                  <option value="">Tất cả Chuỗi Chuyển Động</option>
-                  {patterns.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <Select
-                label="Bài tập"
-                value={editExerciseId}
-                onChange={e => setEditExerciseId(e.target.value)}
-                options={(editFilterPattern
-                  ? exercises.filter(ex => ex.movement_pattern_id === editFilterPattern)
-                  : exercises
-                ).map(ex => ({ value: ex.id, label: ex.name }))}
-                placeholder="Chọn bài tập..."
-              />
-            </div>
-
-            {/* ── Kiểu xếp lịch (Loading Style) ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {LOADING_STYLE_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setEditLoadingStyle(opt.value)}
-                  className={cn(
-                    'flex flex-col items-start rounded-lg border px-3.5 py-3 text-left transition-all',
-                    editLoadingStyle === opt.value
-                      ? 'border-amber bg-amber/8 shadow-sm'
-                      : 'border-ink/12 bg-white hover:border-ink/25',
-                  )}
-                >
-                  <span className={cn(
-                    'text-xs font-bold',
-                    editLoadingStyle === opt.value ? 'text-amber' : 'text-ink',
-                  )}>
-                    {opt.label}
-                  </span>
-                  <span className="text-[11px] text-ink/45 mt-0.5 leading-snug">
-                    {opt.desc}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {/* ── Prescription grid (context-aware col 4, mirrors add panel) ── */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Input
-                label="Số hiệp" type="number"
-                value={editSets} onChange={e => setEditSets(e.target.value)}
-              />
-              <Input
-                label="Rep Tối thiểu" type="number"
-                value={editRepMin} onChange={e => setEditRepMin(e.target.value)}
-              />
-              <Input
-                label="Rep Tối đa" type="number"
-                value={editRepMax} onChange={e => setEditRepMax(e.target.value)}
-              />
-              {isStrengthContext ? (
-                <Input
-                  label="% 1RM mục tiêu" type="number"
-                  value={editTarget1rmPct} onChange={e => setEditTarget1rmPct(e.target.value)}
-                />
-              ) : (
-                <Input
-                  label="RIR mục tiêu" type="number"
-                  value={editRir} onChange={e => setEditRir(e.target.value)}
-                />
-              )}
-            </div>
-
-            {/* ── AMRAP toggle (hypertrophy context only) ── */}
-            {!isStrengthContext && (
-              <label className={cn(
-                'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
-                editIsAmrap ? 'border-amber/40 bg-amber/6' : 'border-ink/10 bg-ink/2 hover:border-ink/20',
-              )}>
-                <input
-                  type="checkbox"
-                  checked={editIsAmrap}
-                  onChange={e => setEditIsAmrap(e.target.checked)}
-                  className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-amber"
-                />
-                <div className="min-w-0">
-                  <p className={cn('text-xs font-bold', editIsAmrap ? 'text-amber' : 'text-ink')}>
-                    🔥 Thiết lập hiệp cuối AMRAP
-                  </p>
-                  <p className="text-[11px] text-ink/45 mt-0.5 leading-snug">
-                    Hiệp cuối thực hiện tối đa số lần tới khi RPE 10.
-                  </p>
-                </div>
-              </label>
-            )}
-
-            {/* ── %1RM mục tiêu (tùy chọn) — hypertrophy/standard context ──
-                Strength context shows %1RM in the grid's column 4 above. */}
-            {!isStrengthContext && (
-              <div className="max-w-[220px]">
-                <Input
-                  label="% 1RM mục tiêu (tùy chọn)" type="number"
-                  value={editTarget1rmPct} onChange={e => setEditTarget1rmPct(e.target.value)}
-                  placeholder="vd 70"
-                />
-              </div>
-            )}
-
-            {/* ── Bài khởi động (warmup) — independent display marker ── */}
-            <label className={cn(
-              'flex items-start gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-all select-none',
-              editIsWarmup ? 'border-sky-400/45 bg-sky-400/8' : 'border-ink/10 bg-ink/2 hover:border-ink/20',
-            )}>
-              <input
-                type="checkbox"
-                checked={editIsWarmup}
-                onChange={e => setEditIsWarmup(e.target.checked)}
-                className="h-4 w-4 mt-0.5 shrink-0 rounded border-ink/20 accent-sky-500"
-              />
-              <div className="min-w-0">
-                <p className={cn('text-xs font-bold', editIsWarmup ? 'text-sky-600' : 'text-ink')}>
-                  🤸 Bài khởi động
-                </p>
-                <p className="text-[11px] text-ink/45 mt-0.5 leading-snug">
-                  Hiện ghi chú “Bài khởi động” trong bảng để người tập nhận biết.
-                </p>
-              </div>
-            </label>
-
-            {/* ── Ghi chú cho học viên (phase_exercises.notes) ── */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                Ghi chú bài tập
-                <span className="ml-1.5 font-normal normal-case text-ink/35">(học viên sẽ thấy)</span>
-              </label>
-              <textarea
-                value={editNotes}
-                onChange={e => setEditNotes(e.target.value)}
-                rows={2}
-                maxLength={300}
-                placeholder="vd: Giữ lưng thẳng, hạ chậm 3 giây, nghỉ 90s giữa hiệp…"
-                className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink leading-snug focus:border-amber focus:ring-1 focus:ring-amber outline-none resize-y placeholder:text-ink/30"
-              />
-            </div>
-
-            {/* ── STT / Order label ── */}
-            <div className="flex flex-col gap-1.5 max-w-[220px]">
-              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                Mã STT
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={editOrderLabel}
-                  onChange={e => setEditOrderLabel(e.target.value.toUpperCase())}
-                  placeholder="A, B1…"
-                  maxLength={4}
-                  className="w-24 rounded-lg border border-ink/20 px-3 py-2 text-sm font-bold text-ink uppercase focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                />
-                {editOrderLabel && (
-                  <span className={cn(
-                    'rounded-md border font-bold text-sm px-2.5 py-0.5',
-                    orderBadgeClass(editOrderLabel),
-                  )}>
-                    {editOrderLabel.toUpperCase()}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {editError && (
-              <p className="rounded-lg bg-danger/8 border border-danger/20 px-3 py-2 text-sm text-danger">
-                {editError}
-              </p>
-            )}
-
-            <div className="flex gap-2 pt-1">
-              <Button
-                type="button"
-                variant="primary"
-                loading={editSaving}
-                onClick={() => void handleSaveEdit()}
-                disabled={!editExerciseId || editSaving}
-                className="flex-1"
-              >
-                Lưu thay đổi
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setEditingExercise(null)}
-                disabled={editSaving}
-              >
-                Huỷ
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+        exercises={exercises}
+        patterns={patterns}
+        selectedPhaseId={selectedPhaseId}
+        isStrengthContext={isStrengthContext}
+        onSaved={(phaseExerciseId, row) => {
+          setPhaseExercises(prev => prev.map(pe => pe.id === phaseExerciseId ? row : pe))
+          setEditingExercise(null)
+        }}
+      />
 
       {/* ── Confirm delete modal ─────────────────────────────────────────── */}
       <ConfirmModal
@@ -4315,160 +2949,11 @@ export function PhaseExerciseBuilder({ blocks, exercises: libraryProp, patterns,
       />
 
       {/* ── Edit phase parameters modal ──────────────────────────────────────── */}
-      <Modal
-        open={paramsPhaseId !== null}
-        onClose={() => setParamsPhaseId(null)}
-        title="Chỉnh sửa thông số giai đoạn"
-        size="lg"
-      >
-        <div className="space-y-4">
-          <Select
-            label="Loại giai đoạn"
-            value={pPhaseType}
-            onChange={e => setPPhaseType(e.target.value as PhaseType)}
-            options={[
-              { value: 'training',    label: 'Tập luyện' },
-              { value: 'maintenance', label: 'Duy trì' },
-              { value: 'active_rest', label: 'Nghỉ tích cực' },
-            ]}
-          />
-
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label="Độ dài (tuần)"
-              type="number"
-              min={1}
-              value={pDuration}
-              onFocus={e => e.target.select()}
-              onChange={e => setPDuration(e.target.value)}
-            />
-            <Input
-              label="Tần suất / tuần"
-              type="number"
-              min={1}
-              value={pFreq}
-              onFocus={e => e.target.select()}
-              onChange={e => setPFreq(e.target.value)}
-            />
-          </div>
-
-          {/* Rep zones editor */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                Khoảng Reps (vùng reps)
-              </label>
-              <button
-                type="button"
-                onClick={addRepZone}
-                className="text-xs font-semibold text-amber hover:underline"
-              >
-                + Thêm vùng
-              </button>
-            </div>
-            {pRepRanges.length === 0 ? (
-              <p className="text-xs text-ink/40">Chưa có vùng reps nào. Bấm “+ Thêm vùng”.</p>
-            ) : (
-              <div className="space-y-2">
-                {pRepRanges.map((rr, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <input
-                      type="number" min={1} inputMode="numeric" value={rr.min}
-                      onFocus={e => e.target.select()}
-                      onChange={e => updateRepZone(i, { min: e.target.value })}
-                      className="w-16 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-center font-mono focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                      aria-label="Reps tối thiểu"
-                    />
-                    <span className="text-ink/30">–</span>
-                    <input
-                      type="number" min={1} inputMode="numeric" value={rr.max}
-                      onFocus={e => e.target.select()}
-                      onChange={e => updateRepZone(i, { max: e.target.value })}
-                      className="w-16 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-center font-mono focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                      aria-label="Reps tối đa"
-                    />
-                    <select
-                      value={rr.exercise_type ?? ''}
-                      onChange={e => updateRepZone(i, { exercise_type: (e.target.value || undefined) as RepRange['exercise_type'] })}
-                      className="flex-1 rounded-lg border border-ink/15 px-2 py-1.5 text-sm text-ink bg-white focus:border-amber focus:ring-1 focus:ring-amber outline-none"
-                    >
-                      {EXERCISE_TYPE_OPTIONS.map(o => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => removeRepZone(i)}
-                      title="Xoá vùng reps"
-                      className="h-8 w-8 shrink-0 rounded flex items-center justify-center text-danger/50 hover:text-danger hover:bg-danger/8 transition-colors"
-                    >
-                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Maintenance-specific */}
-          {pPhaseType === 'maintenance' && (
-            <div className="grid grid-cols-2 gap-4 rounded-lg bg-ink/3 border border-ink/8 p-3">
-              <Input
-                label="% khối lượng (so với Meso-2)"
-                type="number"
-                min={1}
-                value={pReductionPct}
-                onFocus={e => e.target.select()}
-                onChange={e => setPReductionPct(e.target.value)}
-              />
-              <label className="flex items-center gap-2 self-end pb-2 text-sm text-ink/70">
-                <input
-                  type="checkbox"
-                  checked={pIncludesDeload}
-                  onChange={e => setPIncludesDeload(e.target.checked)}
-                  className="accent-amber h-4 w-4"
-                />
-                Kết thúc bằng tuần deload
-              </label>
-            </div>
-          )}
-
-          {/* Active-rest-specific */}
-          {pPhaseType === 'active_rest' && (
-            <div className="grid grid-cols-2 gap-4 rounded-lg bg-ink/3 border border-ink/8 p-3">
-              <Input
-                label="RIR tối đa"
-                type="number"
-                min={0}
-                value={pMaxRir}
-                onFocus={e => e.target.select()}
-                onChange={e => setPMaxRir(e.target.value)}
-              />
-              <Input
-                label="% trọng lượng tối đa"
-                type="number"
-                min={1}
-                value={pMaxWeightPct}
-                onFocus={e => e.target.select()}
-                onChange={e => setPMaxWeightPct(e.target.value)}
-              />
-            </div>
-          )}
-
-          {pError && <p className="text-sm text-danger">{pError}</p>}
-
-          <div className="flex gap-2 pt-1">
-            <Button variant="primary" loading={pSaving} onClick={() => void savePhaseParams()} className="flex-1">
-              Lưu thay đổi
-            </Button>
-            <Button variant="secondary" onClick={() => setParamsPhaseId(null)} disabled={pSaving}>
-              Huỷ
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <PhaseParamsModal
+        phase={paramsPhase}
+        onClose={() => setParamsPhase(null)}
+        onApply={applyPhaseParams}
+      />
     </div>
   )
 }
